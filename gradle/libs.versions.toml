@@ -38,7 +38,7 @@ okhttp = "5.5.0"
 kotlinxSerialization = "1.11.0"
 
 # Image loading
-coil = "3.6.2"
+coil = "3.6.3"
 
 # Markdown rendering (Markwon — themed directly so dark mode looks right)
 markwon = "4.6.2"
