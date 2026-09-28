@@ -31,9 +31,10 @@ updates:
       # catch-all PR alongside unrelated libraries.
       build-toolchain:
         patterns:
-          - "com.android.tools.build:*"
-          - "com.android.application*"
-          - "com.android.library*"
+          # Every AGP plugin (application, test, legacy-kapt, …) reads the one
+          # `agp` version in libs.versions.toml, so they must all land here —
+          # one left out becomes a second PR bumping the same line.
+          - "com.android.*"
           - "org.jetbrains.kotlin*"
           - "com.google.devtools.ksp*"
           - "com.google.dagger:*"
