@@ -10,6 +10,12 @@ updates:
       day: monday
       time: "07:00"
       timezone: Europe/London
+    # New releases wait a week before Dependabot proposes them: minor and patch
+    # PRs merge themselves once CI is green, so this is the window for a
+    # hijacked release to be caught and yanked upstream first. Security
+    # updates skip the wait.
+    cooldown:
+      default-days: 7
     open-pull-requests-limit: 5
     commit-message:
       prefix: deps
@@ -52,6 +58,8 @@ updates:
       day: monday
       time: "07:00"
       timezone: Europe/London
+    cooldown:
+      default-days: 7
     open-pull-requests-limit: 3
     commit-message:
       prefix: ci
