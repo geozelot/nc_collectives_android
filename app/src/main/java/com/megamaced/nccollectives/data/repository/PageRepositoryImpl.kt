@@ -176,27 +176,40 @@ class PageRepositoryImpl
                 // refresh (e.g. SyncWorker overlapping the foreground caller)
                 // can otherwise observe the intermediate "upserted but not
                 // yet reconciled" state, causing flicker or — worse — wipe
-                // rows the parallel run just inserted. B-42: avoid the
-                // `WHERE id NOT IN ()` SQL syntax error by short-circuiting
-                // on an empty keep-list to `deleteForCollective`.
+                // rows the parallel run just inserted.
                 database.withTransaction {
                     if (!accountGeneration.isCurrent(generation)) {
                         Timber.i("Account changed mid-sync; abandoning the page refresh")
                         return@withTransaction
                     }
-                    pageDao.upsertAll(entities)
-                    val keepIds = entities.map { it.id }
-                    val keepSet = keepIds.toSet()
-                    // B-66: the rows about to be dropped have to be cascaded
-                    // by hand — see [cascadeForPages]. Read the ids after the
-                    // upsert so a page the server just added isn't mistaken
-                    // for one going away.
-                    cascadeForPages(pageDao.idsForCollective(collectiveId).filterNot { it in keepSet })
-                    if (keepIds.isEmpty()) {
-                        pageDao.deleteForCollective(collectiveId)
-                    } else {
-                        pageDao.deleteMissingForCollective(collectiveId, keepIds)
+                    // B-91: every collective has a landing page the server
+                    // won't let anyone delete, so a listing with no pages at
+                    // all describes a server fault, not the collective.
+                    // Reconciling against it used to empty the cache.
+                    if (entities.isEmpty()) {
+                        Timber.w("Collective %d listed no pages; keeping the cache", collectiveId)
+                        return@withTransaction
                     }
+                    pageDao.upsertAll(entities)
+                    val listed = entities.mapTo(HashSet()) { it.id }
+                    // Read the ids after the upsert so a page the server just
+                    // added isn't mistaken for one going away. B-91: a page
+                    // the listing omits is deleted only if nothing on it is
+                    // unsynced; see [reconcilableDeletions].
+                    val unlisted = pageDao.idsForCollective(collectiveId).filterNot { it in listed }
+                    val dropped = reconcilableDeletions(
+                        unlisted = unlisted,
+                        unsynced = pageDao.idsHoldingUnsyncedWork(collectiveId),
+                        parentOf = pageDao.parentLinksForCollective(collectiveId).associate { it.id to it.parentId },
+                    )
+                    if (dropped.size < unlisted.size) {
+                        Timber.w(
+                            "Collective %d: kept %d unlisted page(s) holding unsynced work",
+                            collectiveId,
+                            unlisted.size - dropped.size,
+                        )
+                    }
+                    deletePagesWithTheirRows(dropped, pageDao, attachmentDao, editQueueDao)
                 }
             }
 

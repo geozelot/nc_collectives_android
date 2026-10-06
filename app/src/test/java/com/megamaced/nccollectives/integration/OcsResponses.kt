@@ -46,6 +46,14 @@ internal object OcsResponses {
     /** `GET /collectives/{id}/pages` — the `pages` envelope. */
     fun pageList(vararg pages: String): MockResponse = envelope("""{"pages":[${pages.joinToString(",")}]}""")
 
+    fun collective(
+        id: Long,
+        name: String = "Collective $id",
+    ): String = """{"id":$id,"name":"$name","canEdit":true}"""
+
+    /** `GET /collectives` — the `collectives` envelope. */
+    fun collectiveList(vararg collectives: String): MockResponse = envelope("""{"collectives":[${collectives.joinToString(",")}]}""")
+
     /** `GET /collectives/{id}/tags`, which `refresh` fires alongside the page list. */
     fun emptyTagList(): MockResponse = envelope("""{"tags":[]}""")
 

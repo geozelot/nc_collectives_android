@@ -54,9 +54,15 @@ data class CollectiveDto(
     val userShowMembers: Boolean = true,
 )
 
+/**
+ * B-91: no default on [collectives], for the reason `PagesEnvelopeData`
+ * gives. Here the cost was higher: `CollectiveRepositoryImpl.refresh`
+ * reconciles every collective against this list, so a reply missing the key
+ * emptied the whole account's cache.
+ */
 @Serializable
 data class CollectivesEnvelopeData(
-    val collectives: List<CollectiveDto> = emptyList(),
+    val collectives: List<CollectiveDto>,
 )
 
 /**

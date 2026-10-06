@@ -41,9 +41,17 @@ data class PageDto(
     val lastUserDisplayName: String = "",
 )
 
+/**
+ * B-91: no default on [pages]. `PageRepositoryImpl.refresh` deletes every
+ * cached page this list doesn't name. With `emptyList()` as the default, and
+ * `coerceInputValues` mapping a null onto that default, a 200 whose `data`
+ * had no `pages` key decoded as "this collective has no pages" and emptied
+ * the collective. Without the default, the same reply fails to decode, so
+ * `apiCall` turns it into `ApiResult.Unexpected` and nothing is written.
+ */
 @Serializable
 data class PagesEnvelopeData(
-    val pages: List<PageDto> = emptyList(),
+    val pages: List<PageDto>,
 )
 
 /**
