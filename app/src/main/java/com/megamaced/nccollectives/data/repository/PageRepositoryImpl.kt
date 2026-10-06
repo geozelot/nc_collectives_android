@@ -605,16 +605,28 @@ class PageRepositoryImpl
                     // a force-write so the flush worker doesn't second-guess
                     // the user's explicit "Replace with my draft" intent on
                     // a 412 (B-46).
-                    editQueueDao.upsert(
-                        EditQueueEntity(
-                            pageId = pageId,
-                            baseEtag = null,
-                            newBodyMd = newBody,
-                            queuedAt = System.currentTimeMillis(),
-                            status = "PENDING",
-                            forceWrite = true,
-                        ),
-                    )
+                    //
+                    // B-98: and the draft moves into the queue rather than
+                    // staying on the page row beside it. The user has
+                    // resolved the conflict. Left in place, the banner kept
+                    // offering Replace and Discard for it while further
+                    // offline edits coalesced into this row: Discard then
+                    // deleted the row and those edits with it, and Replace
+                    // re-queued the old draft over them. The queued body is
+                    // what the page shows from here on.
+                    database.withTransaction {
+                        editQueueDao.upsert(
+                            EditQueueEntity(
+                                pageId = pageId,
+                                baseEtag = null,
+                                newBodyMd = newBody,
+                                queuedAt = System.currentTimeMillis(),
+                                status = "PENDING",
+                                forceWrite = true,
+                            ),
+                        )
+                        pageDao.updateDraft(pageId, null)
+                    }
                     syncScheduler.flushEditsWhenOnline()
                     SaveOutcome.Queued
                 }
