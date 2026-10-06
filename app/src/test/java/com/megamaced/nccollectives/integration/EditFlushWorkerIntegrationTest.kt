@@ -8,6 +8,7 @@ import androidx.work.WorkerParameters
 import androidx.work.testing.TestListenableWorkerBuilder
 import com.megamaced.nccollectives.data.db.entity.EditQueueEntity
 import com.megamaced.nccollectives.sync.EditFlushWorker
+import kotlinx.coroutines.runBlocking
 import kotlinx.coroutines.test.runTest
 import org.junit.After
 import org.junit.Assert.assertEquals
@@ -285,6 +286,111 @@ class EditFlushWorkerIntegrationTest {
             assertNotNull("and the refused row is still queued", env.db.editQueueDao().forPage(12))
         }
 
+    // --- B-93: the run's snapshot goes stale while it works through it ---
+
+    @Test
+    fun aRowAForegroundSaveSettledAfterTheSnapshot_isNotParkedAsAConflict() =
+        runTest {
+            // The run reads every pending row up front. While it is still on an
+            // earlier row, the user saves page 41 online: the PUT lands, the
+            // queue row is deleted. The run then reaches its stale copy of that
+            // row, sees an etag that has moved (the user's own save moved it),
+            // and used to park the *older* text as a conflict draft, where
+            // "Replace with my draft" overwrites the newer save with it.
+            env.seedPage(id = 11, fileName = "earlier.md", bodyMd = "a", bodyEtag = "a-1")
+            env.seedPage(id = 41, fileName = "later.md", bodyMd = "server", bodyEtag = "etag-1")
+            env.db.editQueueDao().upsert(queued(pageId = 11, body = "a edited", baseEtag = "a-1", queuedAt = 1))
+            env.db.editQueueDao().upsert(queued(pageId = 41, body = "older offline text", baseEtag = "etag-1", queuedAt = 2))
+            dispatcher
+                .on("earlier.md", serverBody("a", "a-1"), method = "GET")
+                .on("earlier.md", OcsResponses.webDav(204, etag = "\"a-2\""), method = "PUT")
+                .on("later.md", serverBody("newest text", "etag-2"), method = "GET")
+                .whileInFlight("earlier.md") {
+                    runBlocking { foregroundSaveLanded(pageId = 41, body = "newest text", etag = "etag-2") }
+                }
+
+            worker().doWork()
+
+            val row = env.db.pageDao().getById(41)
+            assertNull("nothing is in conflict: the newest text is on the server", row?.draftBodyMd)
+            assertEquals("newest text", row?.bodyMd)
+            assertNull(env.db.editQueueDao().forPage(41))
+            assertTrue(
+                "the settled row must not be written again",
+                dispatcher.requestsTo("later.md").none { it.method == "PUT" },
+            )
+        }
+
+    @Test
+    fun aRowANewerSaveReplacedAfterTheSnapshot_flushesTheNewerBody() =
+        runTest {
+            // An offline save coalesces a newer body into the row the run has
+            // already snapshotted. Sending the snapshot puts text on the server
+            // that the user has already moved past, for collaborators to see,
+            // and only the next run corrects it.
+            env.seedPage(id = 11, fileName = "earlier.md", bodyMd = "a", bodyEtag = "a-1")
+            env.seedPage(id = 41, fileName = "later.md", bodyMd = "server", bodyEtag = "etag-1")
+            env.db.editQueueDao().upsert(queued(pageId = 11, body = "a edited", baseEtag = "a-1", queuedAt = 1))
+            env.db.editQueueDao().upsert(queued(pageId = 41, body = "first draft", baseEtag = "etag-1", queuedAt = 2))
+            dispatcher
+                .on("earlier.md", serverBody("a", "a-1"), method = "GET")
+                .on("earlier.md", OcsResponses.webDav(204, etag = "\"a-2\""), method = "PUT")
+                .on("later.md", serverBody("server", "etag-1"), method = "GET")
+                .on("later.md", OcsResponses.webDav(204, etag = "\"etag-2\""), method = "PUT")
+                .whileInFlight("earlier.md") {
+                    runBlocking {
+                        env.db.editQueueDao().upsert(queued(pageId = 41, body = "second draft", baseEtag = "etag-1", queuedAt = 2))
+                    }
+                }
+
+            worker().doWork()
+
+            val puts = dispatcher.requestsTo("later.md").filter { it.method == "PUT" }
+            assertEquals(listOf("second draft"), puts.map { it.body.readUtf8() })
+            assertNull(env.db.editQueueDao().forPage(41))
+        }
+
+    @Test
+    fun aRowTheUserDiscardedAfterTheSnapshot_isLeftAlone() =
+        runTest {
+            env.seedPage(id = 11, fileName = "earlier.md", bodyMd = "a", bodyEtag = "a-1")
+            env.seedPage(id = 41, fileName = "later.md", bodyMd = "server", bodyEtag = "etag-1")
+            env.db.editQueueDao().upsert(queued(pageId = 11, body = "a edited", baseEtag = "a-1", queuedAt = 1))
+            env.db.editQueueDao().upsert(queued(pageId = 41, body = "thrown away", baseEtag = "etag-1", queuedAt = 2))
+            dispatcher
+                .on("earlier.md", serverBody("a", "a-1"), method = "GET")
+                .on("earlier.md", OcsResponses.webDav(204, etag = "\"a-2\""), method = "PUT")
+                .on("later.md", serverBody("server", "etag-1"), method = "GET")
+                .on("later.md", OcsResponses.webDav(204, etag = "\"etag-2\""), method = "PUT")
+                .whileInFlight("earlier.md") {
+                    runBlocking { env.pageRepository.discardDraft(41) }
+                }
+
+            worker().doWork()
+
+            assertTrue(
+                "a discarded edit must not reach the server",
+                dispatcher.requestsTo("later.md").none { it.method == "PUT" },
+            )
+            assertNull(
+                env.db
+                    .pageDao()
+                    .getById(41)
+                    ?.draftBodyMd,
+            )
+        }
+
+    /** What `PageRepositoryImpl.saveBody`'s success branch leaves behind. */
+    private suspend fun foregroundSaveLanded(
+        pageId: Long,
+        body: String,
+        etag: String,
+    ) {
+        env.db.pageDao().updateBody(pageId, body, etag, 2L)
+        env.db.pageDao().updateDraft(pageId, null)
+        env.db.editQueueDao().deleteForPage(pageId)
+    }
+
     /** A WebDAV `GET` of a page body: what the flush preflight reads. */
     private fun serverBody(
         markdown: String,
@@ -295,11 +401,12 @@ class EditFlushWorkerIntegrationTest {
         pageId: Long,
         body: String,
         baseEtag: String?,
+        queuedAt: Long = 1L,
     ) = EditQueueEntity(
         pageId = pageId,
         baseEtag = baseEtag,
         newBodyMd = body,
-        queuedAt = 1L,
+        queuedAt = queuedAt,
         status = "PENDING",
     )
 

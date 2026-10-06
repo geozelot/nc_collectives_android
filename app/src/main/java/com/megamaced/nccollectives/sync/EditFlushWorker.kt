@@ -63,12 +63,27 @@ class EditFlushWorker
             if (entries.isEmpty()) return Result.success()
 
             var retry = false
-            for (entry in entries) {
+            for (snapshot in entries) {
                 // Issue #30: claiming the row is also what spends one of its
                 // own attempts. `attemptsSoFar` is what the classifier below
                 // is given, in place of this worker's `runAttemptCount`.
-                editQueueDao.markInFlight(entry.pageId)
-                val attemptsSoFar = entry.attempts + 1
+                //
+                // B-93: and from the claim on, this run works from the row as
+                // it is *now*, not from `entries`. That list is read once, up
+                // front, and a run can spend minutes on the rows before this
+                // one while the user keeps working. A foreground save can
+                // settle the row, a discard can delete it, and an offline
+                // save can coalesce a newer body into it. Working from the
+                // snapshot sent text the user had discarded or moved past,
+                // and parked an older body as a conflict draft over a newer
+                // save, where "Replace with my draft" would then overwrite
+                // the newer save with it.
+                if (editQueueDao.markInFlight(snapshot.pageId) == 0) {
+                    Timber.i("Queued edit for page %d was settled elsewhere; skipping", snapshot.pageId)
+                    continue
+                }
+                val entry = editQueueDao.forPage(snapshot.pageId) ?: continue
+                val attemptsSoFar = entry.attempts
                 val page = pageDao.getById(entry.pageId)
                 if (page == null) {
                     // The page disappeared locally (collective removed?). Drop
@@ -314,11 +329,21 @@ class EditFlushWorker
                 // user's latest work, and `CONFLICTED` rows are read by
                 // nothing — parking the snapshot would strand that work
                 // where neither the editor nor the banner can reach it.
-                val latest = editQueueDao.forPage(entry.pageId)?.newBodyMd ?: entry.newBodyMd
-                pageDao.updateDraft(entry.pageId, latest)
+                //
+                // B-93: and if there is no row now, there is nothing to park.
+                // Something else settled it while the PUT was out (a
+                // foreground save, a discard), and falling back to the
+                // snapshot used to resurrect text the user had moved past as
+                // a conflict draft.
+                val latest = editQueueDao.forPage(entry.pageId)
+                if (latest == null) {
+                    Timber.i("Queued edit for page %d was settled while in flight; nothing to park", entry.pageId)
+                    return@withTransaction
+                }
+                pageDao.updateDraft(entry.pageId, latest.newBodyMd)
                 editQueueDao.setStatus(entry.pageId, "CONFLICTED")
+                Timber.w("Giving up on the queued edit for page %d; kept it as a draft", entry.pageId)
             }
-            Timber.w("Giving up on the queued edit for page %d; kept it as a draft", entry.pageId)
         }
     }
 
