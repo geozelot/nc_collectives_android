@@ -64,8 +64,7 @@ class CollectiveRepositoryImpl
                         return@withTransaction
                     }
                     dao.upsertAll(entities)
-                    val keepIds = entities.map { it.id }
-                    val keepSet = keepIds.toSet()
+                    val keepIds = entities.mapTo(LinkedHashSet()) { it.id }
                     // B-65: a collective that stopped being shared with the
                     // user just isn't in the response any more, so this is the
                     // path that fires — and it has to cascade. Work out what
@@ -78,11 +77,29 @@ class CollectiveRepositoryImpl
                     // nothing ever writes a row with a `trashTimestamp`. If
                     // that ever changes, a trashed row would be deleted here
                     // without its pages — as it already was before this fix.
-                    cascadeForCollectives(dao.list().map { it.id }.filterNot { it in keepSet })
+                    for (gone in dao.list().map { it.id }.filterNot { it in keepIds }) {
+                        // B-91: unless it holds unsynced work. The edit can't
+                        // reach the server any more, but the user can still
+                        // copy it out of the conflict banner, as long as the
+                        // collective and the page are still here to open.
+                        val unsynced = pageDao.idsHoldingUnsyncedWork(gone)
+                        if (unsynced.isEmpty()) {
+                            cascadeForCollectives(listOf(gone))
+                            continue
+                        }
+                        Timber.w("Collective %d is no longer listed but holds unsynced work; keeping it", gone)
+                        keepIds += gone
+                        val dropped = reconcilableDeletions(
+                            unlisted = pageDao.idsForCollective(gone),
+                            unsynced = unsynced,
+                            parentOf = pageDao.parentLinksForCollective(gone).associate { it.id to it.parentId },
+                        )
+                        deletePagesWithTheirRows(dropped, pageDao, attachmentDao, editQueueDao)
+                    }
                     if (keepIds.isEmpty()) {
                         dao.clear()
                     } else {
-                        dao.deleteMissing(keepIds)
+                        dao.deleteMissing(keepIds.toList())
                     }
                 }
             }

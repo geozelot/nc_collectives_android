@@ -7,6 +7,7 @@ import androidx.work.Configuration
 import androidx.work.testing.SynchronousExecutor
 import androidx.work.testing.WorkManagerTestInitHelper
 import com.megamaced.nccollectives.data.api.AuthInterceptor
+import com.megamaced.nccollectives.data.api.CirclesApiService
 import com.megamaced.nccollectives.data.api.CollectivesApiService
 import com.megamaced.nccollectives.data.api.HostInterceptor
 import com.megamaced.nccollectives.data.api.PageBodyService
@@ -16,9 +17,11 @@ import com.megamaced.nccollectives.data.auth.StoredCredentials
 import com.megamaced.nccollectives.data.auth.TokenStore
 import com.megamaced.nccollectives.data.db.NcCollectivesDatabase
 import com.megamaced.nccollectives.data.db.entity.AttachmentEntity
+import com.megamaced.nccollectives.data.db.entity.CollectiveEntity
 import com.megamaced.nccollectives.data.db.entity.PageEntity
 import com.megamaced.nccollectives.data.prefs.UserPreferences
 import com.megamaced.nccollectives.data.repository.AttachmentRepositoryImpl
+import com.megamaced.nccollectives.data.repository.CollectiveRepositoryImpl
 import com.megamaced.nccollectives.data.repository.PageRepositoryImpl
 import com.megamaced.nccollectives.di.NetworkModule
 import com.megamaced.nccollectives.domain.repository.AttachmentRepository
@@ -74,6 +77,7 @@ internal class IntegrationEnvironment private constructor(
     val sessionManager: SessionManager,
     val client: OkHttpClient,
     val api: CollectivesApiService,
+    val circlesApi: CirclesApiService,
     val bodyService: PageBodyService,
     val accountGeneration: AccountGeneration,
     val syncScheduler: SyncScheduler,
@@ -100,6 +104,18 @@ internal class IntegrationEnvironment private constructor(
             database = db,
             accountGeneration = accountGeneration,
             attachmentRepository = { attachmentRepository as AttachmentRepository },
+        )
+
+    val collectiveRepository: CollectiveRepositoryImpl =
+        CollectiveRepositoryImpl(
+            api = api,
+            circlesApi = circlesApi,
+            dao = db.collectiveDao(),
+            pageDao = db.pageDao(),
+            attachmentDao = db.attachmentDao(),
+            editQueueDao = db.editQueueDao(),
+            database = db,
+            accountGeneration = accountGeneration,
         )
 
     /** The `https://host:port` the mocked credential names. */
@@ -145,6 +161,30 @@ internal class IntegrationEnvironment private constructor(
             lastSyncedAt = 0,
         )
         db.pageDao().upsertAll(listOf(entity))
+        return entity
+    }
+
+    /** Insert a collective row directly, as a previous `refresh` would have. */
+    suspend fun seedCollective(
+        id: Long = COLLECTIVE_ID,
+        name: String = "Collective $id",
+    ): CollectiveEntity {
+        val entity = CollectiveEntity(
+            id = id,
+            name = name,
+            slug = null,
+            emoji = null,
+            circleId = null,
+            canEdit = true,
+            canShare = true,
+            level = 0,
+            userShowMembers = true,
+            isPageShare = false,
+            trashTimestamp = null,
+            userFavoritePagesCsv = "",
+            lastSyncedAt = 0,
+        )
+        db.collectiveDao().upsert(entity)
         return entity
     }
 
@@ -251,7 +291,7 @@ internal class IntegrationEnvironment private constructor(
                 ).build()
 
             val json = NetworkModule.provideJson()
-            val api = NetworkModule.provideCollectivesApi(NetworkModule.provideRetrofit(client, json))
+            val retrofit = NetworkModule.provideRetrofit(client, json)
             val db = Room
                 .inMemoryDatabaseBuilder(context, NcCollectivesDatabase::class.java)
                 .build()
@@ -263,7 +303,8 @@ internal class IntegrationEnvironment private constructor(
                 tokenStore = tokenStore,
                 sessionManager = sessionManager,
                 client = client,
-                api = api,
+                api = NetworkModule.provideCollectivesApi(retrofit),
+                circlesApi = NetworkModule.provideCirclesApi(retrofit),
                 bodyService = PageBodyService(client, tokenStore),
                 accountGeneration = AccountGeneration(),
                 syncScheduler = SyncScheduler(context, UserPreferences(context)),

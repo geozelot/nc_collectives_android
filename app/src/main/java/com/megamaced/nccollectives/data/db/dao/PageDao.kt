@@ -17,6 +17,15 @@ data class PageCollectiveRef(
 )
 
 /**
+ * Projection returned by [PageDao.parentLinksForCollective]: one tree edge
+ * per page, without the body columns. The landing page's `parentId` is 0.
+ */
+data class PageParentRef(
+    val id: Long,
+    val parentId: Long,
+)
+
+/**
  * R-54: the columns a page *list* row is made of — everything except the
  * two potentially-huge markdown columns (`bodyMd`, `draftBodyMd`), the
  * WebDAV-only path/size fields, and the sync bookkeeping.
@@ -240,14 +249,37 @@ interface PageDao {
         csv: String,
     )
 
-    @Query("DELETE FROM pages WHERE collectiveId = :collectiveId AND id NOT IN (:keepIds)")
-    suspend fun deleteMissingForCollective(
-        collectiveId: Long,
-        keepIds: List<Long>,
-    )
-
     @Query("SELECT id FROM pages WHERE collectiveId = :collectiveId")
     suspend fun idsForCollective(collectiveId: Long): List<Long>
+
+    @Query("SELECT id, parentId FROM pages WHERE collectiveId = :collectiveId")
+    suspend fun parentLinksForCollective(collectiveId: Long): List<PageParentRef>
+
+    /**
+     * B-91: pages in [collectiveId] that hold something only this device has.
+     * That is a queued edit (any status, because a `CONFLICTED` row is what
+     * `EditFlushWorker` leaves when it gives up on a 404), a conflict draft,
+     * or an attachment whose bytes haven't reached the server. A `DELETING`
+     * tombstone doesn't count: it marks something the user asked to remove.
+     *
+     * A server listing is no reason to delete any of these, see
+     * `reconcilableDeletions`.
+     */
+    @Query(
+        """
+        SELECT id FROM pages
+        WHERE collectiveId = :collectiveId AND (
+            draftBodyMd IS NOT NULL
+            OR id IN (SELECT pageId FROM edit_queue)
+            OR id IN (SELECT pageId FROM attachments WHERE status IN ('PENDING', 'UPLOADING', 'FAILED'))
+        )
+        """,
+    )
+    suspend fun idsHoldingUnsyncedWork(collectiveId: Long): List<Long>
+
+    /** Callers keep [ids] under SQLite's bound-argument limit, see `RECONCILE_DELETE_CHUNK`. */
+    @Query("DELETE FROM pages WHERE id IN (:ids)")
+    suspend fun deleteByIds(ids: List<Long>)
 
     @Query("DELETE FROM pages WHERE collectiveId = :collectiveId")
     suspend fun deleteForCollective(collectiveId: Long)
