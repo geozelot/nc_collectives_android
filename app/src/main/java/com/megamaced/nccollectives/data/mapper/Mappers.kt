@@ -5,6 +5,7 @@ import com.megamaced.nccollectives.data.api.dto.CircleMemberDto
 import com.megamaced.nccollectives.data.api.dto.CollectiveDto
 import com.megamaced.nccollectives.data.api.dto.PageDto
 import com.megamaced.nccollectives.data.db.dao.PageListRow
+import com.megamaced.nccollectives.data.db.dao.PageMetadata
 import com.megamaced.nccollectives.data.db.entity.CollectiveEntity
 import com.megamaced.nccollectives.data.db.entity.PageEntity
 import com.megamaced.nccollectives.data.joinTags
@@ -101,7 +102,43 @@ internal fun PageDto.toEntity(
     existingTagsCsv: String? = null,
     tagNamesById: Map<Long, String>? = null,
 ): PageEntity =
-    PageEntity(
+    toMetadata(collectiveId, now, existingTagsCsv, tagNamesById).let { meta ->
+        PageEntity(
+            id = meta.id,
+            collectiveId = meta.collectiveId,
+            parentId = meta.parentId,
+            title = meta.title,
+            emoji = meta.emoji,
+            tagsCsv = meta.tagsCsv,
+            subpageOrderCsv = meta.subpageOrderCsv,
+            isFullWidth = meta.isFullWidth,
+            trashTimestamp = meta.trashTimestamp,
+            serverTimestamp = meta.serverTimestamp,
+            size = meta.size,
+            fileName = meta.fileName,
+            filePath = meta.filePath,
+            collectivePath = meta.collectivePath,
+            linkedPageIdsCsv = meta.linkedPageIdsCsv,
+            lastUserDisplayName = meta.lastUserDisplayName,
+            bodyMd = existingBody,
+            bodyEtag = existingEtag,
+            draftBodyMd = existingDraft,
+            lastSyncedAt = meta.lastSyncedAt,
+        )
+    }
+
+/**
+ * B-100: everything a listing says about a page, which is [toEntity] minus
+ * the body columns. `refresh` writes only this (`PageDao.upsertMetadata`),
+ * so a body, etag or draft written while it was busy is never reverted.
+ */
+internal fun PageDto.toMetadata(
+    collectiveId: Long,
+    now: Long,
+    existingTagsCsv: String?,
+    tagNamesById: Map<Long, String>?,
+): PageMetadata =
+    PageMetadata(
         id = id,
         collectiveId = collectiveId,
         parentId = parentId,
@@ -136,9 +173,6 @@ internal fun PageDto.toEntity(
         collectivePath = collectivePath,
         linkedPageIdsCsv = linkedPageIds.toLongCsv(),
         lastUserDisplayName = lastUserDisplayName,
-        bodyMd = existingBody,
-        bodyEtag = existingEtag,
-        draftBodyMd = existingDraft,
         lastSyncedAt = now,
     )
 
