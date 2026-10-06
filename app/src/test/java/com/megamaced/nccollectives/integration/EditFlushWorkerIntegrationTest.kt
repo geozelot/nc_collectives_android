@@ -351,7 +351,7 @@ class EditFlushWorkerIntegrationTest {
         }
 
     @Test
-    fun aRowTheUserDiscardedAfterTheSnapshot_isLeftAlone() =
+    fun aRowThatWentAfterTheSnapshot_isLeftAlone() =
         runTest {
             env.seedPage(id = 11, fileName = "earlier.md", bodyMd = "a", bodyEtag = "a-1")
             env.seedPage(id = 41, fileName = "later.md", bodyMd = "server", bodyEtag = "etag-1")
@@ -363,13 +363,15 @@ class EditFlushWorkerIntegrationTest {
                 .on("later.md", serverBody("server", "etag-1"), method = "GET")
                 .on("later.md", OcsResponses.webDav(204, etag = "\"etag-2\""), method = "PUT")
                 .whileInFlight("earlier.md") {
-                    runBlocking { env.pageRepository.discardDraft(41) }
+                    // However it went: the user discarded it, or a cascade
+                    // removed it with its page.
+                    runBlocking { env.db.editQueueDao().deleteForPage(41) }
                 }
 
             worker().doWork()
 
             assertTrue(
-                "a discarded edit must not reach the server",
+                "an edit that has gone must not reach the server",
                 dispatcher.requestsTo("later.md").none { it.method == "PUT" },
             )
             assertNull(
