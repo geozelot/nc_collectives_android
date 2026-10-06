@@ -17,6 +17,36 @@ data class PageCollectiveRef(
 )
 
 /**
+ * B-100: a page row without its body columns (`bodyMd`, `bodyEtag`,
+ * `draftBodyMd`), which is everything a listing knows about a page.
+ *
+ * Doubles as a Room partial entity for [PageDao.upsertMetadata]. An update
+ * through it can't touch the body columns, because they aren't in it, and
+ * an insert leaves them NULL, which is what a page nobody has opened has.
+ * Room binds by column name, so these property names have to match
+ * `PageEntity`'s.
+ */
+data class PageMetadata(
+    val id: Long,
+    val collectiveId: Long,
+    val parentId: Long,
+    val title: String,
+    val emoji: String?,
+    val tagsCsv: String,
+    val subpageOrderCsv: String,
+    val isFullWidth: Boolean,
+    val trashTimestamp: Long?,
+    val serverTimestamp: Long,
+    val size: Long,
+    val fileName: String,
+    val filePath: String,
+    val collectivePath: String,
+    val linkedPageIdsCsv: String,
+    val lastUserDisplayName: String,
+    val lastSyncedAt: Long,
+)
+
+/**
  * Projection returned by [PageDao.parentLinksForCollective]: one tree edge
  * per page, without the body columns. The landing page's `parentId` is 0.
  */
@@ -113,14 +143,6 @@ interface PageDao {
 
     @Query("SELECT * FROM pages WHERE id = :id")
     suspend fun getById(id: Long): PageEntity?
-
-    /**
-     * R-27: bulk read of every cached row for a collective. Used by
-     * `refresh()` to look up existing body / etag / draft in one query
-     * instead of `getById(dto.id)` N times.
-     */
-    @Query("SELECT * FROM pages WHERE collectiveId = :collectiveId")
-    suspend fun listForCollective(collectiveId: Long): List<PageEntity>
 
     /**
      * R-46: which collective each of [ids] belongs to, in one query.
@@ -251,6 +273,22 @@ interface PageDao {
 
     @Query("SELECT id FROM pages WHERE collectiveId = :collectiveId")
     suspend fun idsForCollective(collectiveId: Long): List<Long>
+
+    /** B-100: what `refresh` compares a listing against, without loading a single body. */
+    @Query(
+        "SELECT id, collectiveId, parentId, title, emoji, tagsCsv, subpageOrderCsv, isFullWidth, " +
+            "trashTimestamp, serverTimestamp, size, fileName, filePath, collectivePath, " +
+            "linkedPageIdsCsv, lastUserDisplayName, lastSyncedAt FROM pages WHERE collectiveId = :collectiveId",
+    )
+    suspend fun metadataForCollective(collectiveId: Long): List<PageMetadata>
+
+    /**
+     * B-100: write what a listing says about pages and nothing else. See
+     * [PageMetadata] for why this can't revert a body, an etag or a draft
+     * written since the caller read the row.
+     */
+    @Upsert(entity = PageEntity::class)
+    suspend fun upsertMetadata(rows: List<PageMetadata>)
 
     @Query("SELECT id, parentId FROM pages WHERE collectiveId = :collectiveId")
     suspend fun parentLinksForCollective(collectiveId: Long): List<PageParentRef>

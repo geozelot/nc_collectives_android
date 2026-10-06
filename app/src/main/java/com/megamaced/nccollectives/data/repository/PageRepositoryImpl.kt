@@ -21,6 +21,7 @@ import com.megamaced.nccollectives.data.db.entity.PageEntity
 import com.megamaced.nccollectives.data.joinTags
 import com.megamaced.nccollectives.data.mapper.toDomain
 import com.megamaced.nccollectives.data.mapper.toEntity
+import com.megamaced.nccollectives.data.mapper.toMetadata
 import com.megamaced.nccollectives.data.splitTags
 import com.megamaced.nccollectives.data.toJsonLongArray
 import com.megamaced.nccollectives.data.toLongCsv
@@ -154,24 +155,7 @@ class PageRepositoryImpl
                     val pages = async { api.listPages(collectiveId) }
                     tags.await() to pages.await()
                 }
-                // R-27: bulk-load existing rows for the collective in one
-                // query, then look up locally in the map. The previous
-                // `pageDao.getById(dto.id)` per DTO was a Room round-trip
-                // per page — for a 200-page collective that's 200 queries
-                // on every refresh.
-                val existingById = pageDao.listForCollective(collectiveId).associateBy { it.id }
-                val entities = response.ocs.data.pages.map { dto ->
-                    val existing = existingById[dto.id]
-                    dto.toEntity(
-                        collectiveId = collectiveId,
-                        now = now,
-                        existingBody = existing?.bodyMd,
-                        existingEtag = existing?.bodyEtag,
-                        existingDraft = existing?.draftBodyMd,
-                        existingTagsCsv = existing?.tagsCsv,
-                        tagNamesById = tagNames,
-                    )
-                }
+                val listing = response.ocs.data.pages
                 // B-43: upsert + reconcile in one transaction. A parallel
                 // refresh (e.g. SyncWorker overlapping the foreground caller)
                 // can otherwise observe the intermediate "upserted but not
@@ -186,12 +170,35 @@ class PageRepositoryImpl
                     // won't let anyone delete, so a listing with no pages at
                     // all describes a server fault, not the collective.
                     // Reconciling against it used to empty the cache.
-                    if (entities.isEmpty()) {
+                    if (listing.isEmpty()) {
                         Timber.w("Collective %d listed no pages; keeping the cache", collectiveId)
                         return@withTransaction
                     }
-                    pageDao.upsertAll(entities)
-                    val listed = entities.mapTo(HashSet()) { it.id }
+                    // R-27: bulk-load the collective's rows in one query and
+                    // look them up locally, rather than a Room round-trip per
+                    // listed page.
+                    //
+                    // B-100: their metadata only, and inside the transaction.
+                    // This used to load every row with its body, outside the
+                    // transaction, and upsert whole entities carrying the
+                    // cached body, etag and draft back. A conflict draft or a
+                    // recorded PUT landing in between was reverted, and every
+                    // sync rewrote every cached body. Now the body columns
+                    // are never read or written here (`PageMetadata`), and a
+                    // row whose metadata hasn't changed isn't written at all,
+                    // so a quiet sync invalidates no observer.
+                    val cached = pageDao.metadataForCollective(collectiveId).associateBy { it.id }
+                    val rows = listing.map { dto ->
+                        dto.toMetadata(
+                            collectiveId = collectiveId,
+                            now = now,
+                            existingTagsCsv = cached[dto.id]?.tagsCsv,
+                            tagNamesById = tagNames,
+                        )
+                    }
+                    val changed = rows.filter { row -> cached[row.id]?.copy(lastSyncedAt = row.lastSyncedAt) != row }
+                    if (changed.isNotEmpty()) pageDao.upsertMetadata(changed)
+                    val listed = rows.mapTo(HashSet()) { it.id }
                     // Read the ids after the upsert so a page the server just
                     // added isn't mistaken for one going away. B-91: a page
                     // the listing omits is deleted only if nothing on it is
