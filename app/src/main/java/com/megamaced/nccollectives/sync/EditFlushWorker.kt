@@ -98,6 +98,9 @@ class EditFlushWorker
                 // re-check the etag they've already overridden is wasted IO
                 // and risks the worker silently turning their override into
                 // a conflict.
+                // What the PUT is conditional on: the etag the edit was written
+                // against, except for B-96's first body of an empty page.
+                var precondition = entry.baseEtag
                 if (!entry.forceWrite) {
                     val currentServer = bodyService.fetchBody(
                         collectivePath = page.collectivePath,
@@ -168,7 +171,15 @@ class EditFlushWorker
                         if (outcome == FlushRowOutcome.SessionGone) return Result.success()
                         continue
                     }
-                    if (currentEtag != entry.baseEtag) {
+                    // B-96: a null base against an *empty* server file is the
+                    // first body of a page `createPage` made. The OCS POST
+                    // creates the file empty, and the body write that follows
+                    // is queued before anything has fetched an etag for it.
+                    // There is nothing there to overwrite, so the edit goes
+                    // ahead, conditional on the etag the preflight just read,
+                    // so that content landing in between still 412s.
+                    val firstBodyOfEmptyPage = entry.baseEtag == null && currentServer.data.markdown.isEmpty()
+                    if (currentEtag != entry.baseEtag && !firstBodyOfEmptyPage) {
                         // Server moved on. Server wins; keep the user's
                         // body as a draft and flag the row.
                         pageDao.updateBody(
@@ -181,6 +192,7 @@ class EditFlushWorker
                         Timber.i("Edit on page %d conflicted; kept local draft", entry.pageId)
                         continue
                     }
+                    if (firstBodyOfEmptyPage) precondition = currentEtag
                 }
 
                 val putResult = bodyService.saveBody(
@@ -191,7 +203,7 @@ class EditFlushWorker
                     // B-46: force-write entries bypass `If-Match`. The
                     // saveBody implementation already treats null as "skip
                     // the precondition header".
-                    baseEtag = if (entry.forceWrite) null else entry.baseEtag,
+                    baseEtag = if (entry.forceWrite) null else precondition,
                 )
                 // B-64: the write has left the device — record what happened
                 // to it even if we're being cancelled. Nothing durable exists
