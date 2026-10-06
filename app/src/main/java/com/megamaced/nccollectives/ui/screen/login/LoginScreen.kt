@@ -14,6 +14,7 @@ import androidx.compose.foundation.layout.padding
 import androidx.compose.foundation.layout.size
 import androidx.compose.foundation.text.KeyboardActions
 import androidx.compose.foundation.text.KeyboardOptions
+import androidx.compose.material3.AlertDialog
 import androidx.compose.material3.Button
 import androidx.compose.material3.CircularProgressIndicator
 import androidx.compose.material3.MaterialTheme
@@ -26,15 +27,20 @@ import androidx.compose.material3.TextButton
 import androidx.compose.runtime.Composable
 import androidx.compose.runtime.LaunchedEffect
 import androidx.compose.runtime.getValue
+import androidx.compose.runtime.mutableStateOf
 import androidx.compose.runtime.remember
+import androidx.compose.runtime.saveable.rememberSaveable
+import androidx.compose.runtime.setValue
 import androidx.compose.ui.Alignment
 import androidx.compose.ui.Modifier
 import androidx.compose.ui.platform.LocalContext
 import androidx.compose.ui.text.input.ImeAction
 import androidx.compose.ui.text.input.KeyboardType
+import androidx.compose.ui.text.style.TextAlign
 import androidx.compose.ui.unit.dp
 import androidx.hilt.navigation.compose.hiltViewModel
 import androidx.lifecycle.compose.collectAsStateWithLifecycle
+import com.megamaced.nccollectives.data.auth.AccountSummary
 import com.megamaced.nccollectives.ui.components.SnackbarStatusEffect
 import timber.log.Timber
 
@@ -47,19 +53,61 @@ import timber.log.Timber
  * go back to. The screen itself is otherwise identical between the two:
  * `AccountSwitcher.signInTo` works out from the credential store which of
  * them is happening.
+ *
+ * B-92: also the re-auth prompt, when [reauthAccount] is set. The server
+ * rejected that account's credential, and signing in again to the same
+ * account keeps everything cached for it, the edit queue included. The
+ * server field is pinned to the account's host, because signing in anywhere
+ * else would be a switch, and a switch wipes. [onRetry] tries the stored
+ * credential again (for a passing outage). [onRemoveAccount] is the ordinary
+ * removal, confirmed first, because it deletes [pendingEdits] unsynced edits.
  */
 @Composable
 fun LoginScreen(
     innerPadding: PaddingValues = PaddingValues(),
     onCancel: (() -> Unit)? = null,
+    reauthAccount: AccountSummary? = null,
+    pendingEdits: Int = 0,
+    onRetry: (() -> Unit)? = null,
+    onRemoveAccount: (() -> Unit)? = null,
     viewModel: LoginViewModel = hiltViewModel(),
 ) {
     val uiState by viewModel.uiState.collectAsStateWithLifecycle()
     val context = LocalContext.current
     val snackbarHostState = remember { SnackbarHostState() }
+    var confirmRemove by rememberSaveable { mutableStateOf(false) }
 
     LaunchedEffect(uiState.loginUrl) {
         uiState.loginUrl?.let { url -> launchCustomTab(context, url) }
+    }
+
+    LaunchedEffect(reauthAccount?.host) {
+        reauthAccount?.let { viewModel.onHostChanged(it.host) }
+    }
+
+    if (confirmRemove && reauthAccount != null && onRemoveAccount != null) {
+        AlertDialog(
+            onDismissRequest = { confirmRemove = false },
+            title = { Text("Remove ${reauthAccount.loginName}?") },
+            text = {
+                Text(
+                    if (pendingEdits > 0) {
+                        "This deletes ${unsyncedEdits(pendingEdits)} from this device. They can't be recovered."
+                    } else {
+                        "This removes the account and its offline copy from this device."
+                    },
+                )
+            },
+            confirmButton = {
+                TextButton(onClick = {
+                    confirmRemove = false
+                    onRemoveAccount()
+                }) { Text("Remove") }
+            },
+            dismissButton = {
+                TextButton(onClick = { confirmRemove = false }) { Text("Cancel") }
+            },
+        )
     }
 
     SnackbarStatusEffect(uiState.error, snackbarHostState, viewModel::dismissError)
@@ -80,16 +128,28 @@ fun LoginScreen(
             verticalArrangement = Arrangement.Center,
         ) {
             Text(
-                text = "NC Collectives",
+                text = if (reauthAccount != null) "Sign in again" else "NC Collectives",
                 style = MaterialTheme.typography.headlineLarge,
             )
 
             Spacer(modifier = Modifier.height(8.dp))
 
             Text(
-                text = "Connect to your Nextcloud server",
+                text = if (reauthAccount != null) {
+                    "Your Nextcloud stopped accepting this device's sign-in for " +
+                        "${reauthAccount.loginName}. " +
+                        if (pendingEdits > 0) {
+                            "${unsyncedEdits(pendingEdits).replaceFirstChar { it.uppercase() }} " +
+                                "will be sent once you're signed in again."
+                        } else {
+                            "Your offline copy stays on this device."
+                        }
+                } else {
+                    "Connect to your Nextcloud server"
+                },
                 style = MaterialTheme.typography.bodyLarge,
                 color = MaterialTheme.colorScheme.onSurfaceVariant,
+                textAlign = TextAlign.Center,
             )
 
             Spacer(modifier = Modifier.height(32.dp))
@@ -105,7 +165,7 @@ fun LoginScreen(
                     imeAction = ImeAction.Go,
                 ),
                 keyboardActions = KeyboardActions(onGo = { viewModel.startLogin() }),
-                enabled = !uiState.isLoading && !uiState.isPolling,
+                enabled = reauthAccount == null && !uiState.isLoading && !uiState.isPolling,
                 modifier = Modifier.fillMaxWidth(),
             )
 
@@ -123,7 +183,7 @@ fun LoginScreen(
                         color = MaterialTheme.colorScheme.onPrimary,
                     )
                 } else {
-                    Text("Log in")
+                    Text(if (reauthAccount != null) "Sign in again" else "Log in")
                 }
             }
 
@@ -136,6 +196,27 @@ fun LoginScreen(
                     style = MaterialTheme.typography.bodyMedium,
                     color = MaterialTheme.colorScheme.onSurfaceVariant,
                 )
+            }
+
+            if (onRetry != null) {
+                Spacer(modifier = Modifier.height(8.dp))
+                TextButton(
+                    onClick = onRetry,
+                    enabled = !uiState.isLoading && !uiState.isPolling,
+                    modifier = Modifier.fillMaxWidth(),
+                ) {
+                    Text("Try again")
+                }
+            }
+
+            if (onRemoveAccount != null) {
+                TextButton(
+                    onClick = { confirmRemove = true },
+                    enabled = !uiState.isLoading && !uiState.isPolling,
+                    modifier = Modifier.fillMaxWidth(),
+                ) {
+                    Text("Remove account")
+                }
             }
 
             if (onCancel != null) {
@@ -155,6 +236,8 @@ fun LoginScreen(
         }
     }
 }
+
+private fun unsyncedEdits(count: Int): String = if (count == 1) "1 unsynced edit" else "$count unsynced edits"
 
 private fun launchCustomTab(
     context: Context,

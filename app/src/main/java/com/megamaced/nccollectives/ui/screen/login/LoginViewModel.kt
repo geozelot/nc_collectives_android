@@ -126,12 +126,23 @@ class LoginViewModel
                         // whether there is an outgoing account's cache to
                         // wipe first. Deciding it there rather than from a
                         // mode flag is what keeps this screen mode-less.
-                        accountSwitcher.signInTo(
+                        val accepted = accountSwitcher.signInTo(
                             host = status.result.server,
                             loginName = status.result.loginName,
                             appPassword = status.result.appPassword,
                         )
-                        _uiState.update { it.copy(isPolling = false, loginSuccess = true) }
+                        _uiState.update {
+                            if (accepted) {
+                                it.copy(isPolling = false, loginSuccess = true)
+                            } else {
+                                // B-92: the re-auth prompt, answered as somebody else.
+                                it.copy(
+                                    isPolling = false,
+                                    error = "That signed in as ${status.result.loginName}. Sign in as the account " +
+                                        "shown to keep its offline changes, or remove it first.",
+                                )
+                            }
+                        }
                     }
 
                     is LoginFlowStatus.Error -> {
