@@ -61,9 +61,17 @@ interface EditQueueDao {
      * Issue #30: the count has to live on the row, because the worker's own
      * `runAttemptCount` belongs to the WorkRequest and a row can join the
      * database under an old one that is already deep in backoff.
+     *
+     * B-93: returns the number of rows claimed, which is 0 when the row has
+     * gone (a foreground save settled it, the user discarded it) or has been
+     * parked `CONFLICTED` since the caller read it. A conflicted row belongs
+     * to the banner, and claiming it would quietly un-park it.
      */
-    @Query("UPDATE edit_queue SET status = 'IN_FLIGHT', attempts = attempts + 1 WHERE pageId = :pageId")
-    suspend fun markInFlight(pageId: Long)
+    @Query(
+        "UPDATE edit_queue SET status = 'IN_FLIGHT', attempts = attempts + 1 " +
+            "WHERE pageId = :pageId AND status != 'CONFLICTED'",
+    )
+    suspend fun markInFlight(pageId: Long): Int
 
     /**
      * Move a queued edit onto a new page id — issue #39, where a rename or
