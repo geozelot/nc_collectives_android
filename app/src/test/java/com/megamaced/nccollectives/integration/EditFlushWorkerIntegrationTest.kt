@@ -285,6 +285,56 @@ class EditFlushWorkerIntegrationTest {
             assertNotNull("and the refused row is still queued", env.db.editQueueDao().forPage(12))
         }
 
+    // --- B-96: the first body of a page created offline-ish ---
+
+    @Test
+    fun theFirstBodyOfANewPage_flushesInsteadOfConflicting() =
+        runTest {
+            // createPage POSTs, then writes the body. When that write is queued
+            // the page row has no etag yet (nothing has fetched it), so the
+            // row's baseEtag is null -- and any etag at all used to read as
+            // "the server moved on". The server's copy is the empty file the
+            // POST created: there is nothing to overwrite.
+            env.seedPage(id = 12, bodyMd = null, bodyEtag = null)
+            env.db.editQueueDao().upsert(queued(pageId = 12, body = "captured text", baseEtag = null))
+            dispatcher
+                .on(".md", serverBody("", "etag-new"), method = "GET")
+                .on(".md", OcsResponses.webDav(204, etag = "\"etag-2\""), method = "PUT")
+
+            worker().doWork()
+
+            val row = env.db.pageDao().getById(12)
+            assertNull("an empty page is not a conflict", row?.draftBodyMd)
+            assertEquals("captured text", row?.bodyMd)
+            assertNull(env.db.editQueueDao().forPage(12))
+            assertEquals(
+                "the write is still conditional, on the empty file the preflight saw",
+                "\"etag-new\"",
+                dispatcher.requestsWithMethod("PUT").single().getHeader("If-Match"),
+            )
+        }
+
+    @Test
+    fun aNullBaseAgainstAPageWithContent_isStillAConflict() =
+        runTest {
+            // B-61 stands: with no base etag, a non-empty server body is one
+            // this edit may never have seen.
+            env.seedPage(id = 12, bodyMd = null, bodyEtag = null)
+            env.db.editQueueDao().upsert(queued(pageId = 12, body = "captured text", baseEtag = null))
+            dispatcher.on(".md", serverBody("someone's text", "etag-9"), method = "GET")
+
+            worker().doWork()
+
+            assertTrue(dispatcher.requestsWithMethod("PUT").isEmpty())
+            assertEquals(
+                "captured text",
+                env.db
+                    .pageDao()
+                    .getById(12)
+                    ?.draftBodyMd,
+            )
+        }
+
     /** A WebDAV `GET` of a page body: what the flush preflight reads. */
     private fun serverBody(
         markdown: String,
