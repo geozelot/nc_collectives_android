@@ -46,7 +46,7 @@ class PageEditViewModelTest {
     @Before
     fun setUp() {
         Dispatchers.setMain(dispatcher)
-        coEvery { pages.saveBody(any(), any()) } returns SaveOutcome.Saved
+        coEvery { pages.saveBody(any(), any(), any()) } returns SaveOutcome.Saved
     }
 
     @After
@@ -68,7 +68,7 @@ class PageEditViewModelTest {
 
             viewModel.save()
             advanceUntilIdle()
-            coVerify(exactly = 0) { pages.saveBody(any(), any()) }
+            coVerify(exactly = 0) { pages.saveBody(any(), any(), any()) }
         }
 
     @Test
@@ -104,7 +104,7 @@ class PageEditViewModelTest {
             advanceUntilIdle()
 
             assertTrue(viewModel.uiState.value.canEdit)
-            coVerify { pages.saveBody(PAGE, "# cached, edited") }
+            coVerify { pages.saveBody(PAGE, "# cached, edited", any()) }
         }
 
     private fun viewModel() =
