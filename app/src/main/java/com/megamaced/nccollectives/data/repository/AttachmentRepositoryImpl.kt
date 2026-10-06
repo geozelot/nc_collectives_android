@@ -338,6 +338,13 @@ class AttachmentRepositoryImpl
             return result
         }
 
+        override suspend fun abandonDeletion(
+            pageId: Long,
+            fileName: String,
+        ) {
+            dropTombstone(AttachmentEntity.key(pageId, fileName))
+        }
+
         private suspend fun dropTombstone(key: String) {
             attachmentDao.delete(key)
             // Issue #23: and the bytes behind it. Dropping only the row

@@ -50,6 +50,10 @@ interface AttachmentDao {
     @Query("UPDATE attachments SET status = 'UPLOADING', attempts = attempts + 1 WHERE id = :id")
     suspend fun markUploading(id: String)
 
+    /** B-103: spend an attempt on a tombstone, which is never claimed as UPLOADING. */
+    @Query("UPDATE attachments SET attempts = attempts + 1 WHERE id = :id")
+    suspend fun spendAttempt(id: String)
+
     /**
      * Put a settled row back in the queue with a fresh budget. The user asked
      * for this one explicitly (issue #23), so it is not a continuation of the

@@ -90,8 +90,7 @@ class AttachmentUploadWorker
                     // survive a process restart.
                     if (row.status == AttachmentEntity.STATUS_DELETING) {
                         val deleted = attachmentRepository.resolveDeletion(row.pageId, row.fileName)
-                        if (deleted !is ApiResult.Success) {
-                            Timber.w("Couldn't remove cancelled upload %s yet: %s", row.id, deleted)
+                        if (deleted !is ApiResult.Success && settleTombstoneFailure(row, deleted)) {
                             retry = true
                         }
                         continue
@@ -366,12 +365,75 @@ class AttachmentUploadWorker
                 }
             }
 
+        /**
+         * B-103: what a failed delete means for its tombstone. Returns true
+         * when another run is worth asking for.
+         *
+         * Every failure used to keep the tombstone and ask for another run,
+         * with no budget and no reading of the answer. A DELETE the server
+         * refuses (403 on the attachment folder, say) therefore kept the
+         * worker retrying for as long as the app was installed, re-running
+         * the whole upload queue each time.
+         */
+        private suspend fun settleTombstoneFailure(
+            row: AttachmentEntity,
+            result: ApiResult<*>,
+        ): Boolean =
+            when (tombstoneFailureAction(result, attemptsSoFar = row.attempts + 1)) {
+                TombstoneFailureAction.RetryFree -> {
+                    true
+                }
+
+                TombstoneFailureAction.RetryLater -> {
+                    attachmentDao.spendAttempt(row.id)
+                    true
+                }
+
+                TombstoneFailureAction.GiveUp -> {
+                    Timber.w("Server won't delete cancelled upload %s (%s); dropping the tombstone", row.id, result)
+                    attachmentRepository.abandonDeletion(row.pageId, row.fileName)
+                    false
+                }
+            }
+
         private fun gcStaged(attachmentId: String) {
             val staged = AttachmentRepositoryImpl.stagedFileFor(appContext, attachmentId)
             if (staged.exists() && !staged.delete()) {
                 Timber.w("Couldn't delete staged upload %s", staged.absolutePath)
             }
         }
+    }
+
+/** B-103: what a failed delete means for a tombstone. */
+internal enum class TombstoneFailureAction {
+    /** Kept, nothing spent: the request never got a verdict from the server. */
+    RetryFree,
+
+    /** Kept, one attempt spent: the server may well say yes next time. */
+    RetryLater,
+
+    /** Dropped: the server said no, or the budget is spent. */
+    GiveUp,
+}
+
+/**
+ * B-103: classify a failed tombstone delete.
+ *
+ * A network failure or an expired session is not the server's answer, so
+ * it spends nothing. 423 Locked is a 4xx by number and transient by
+ * meaning: Text and files_lock locks are released. The rest follow
+ * [isRetryableFailure], within the row's [MAX_UPLOAD_ATTEMPTS].
+ */
+internal fun tombstoneFailureAction(
+    result: ApiResult<*>,
+    attemptsSoFar: Int,
+): TombstoneFailureAction =
+    when {
+        result is ApiResult.NetworkError || result == ApiResult.Unauthorised -> TombstoneFailureAction.RetryFree
+        attemptsSoFar >= MAX_UPLOAD_ATTEMPTS -> TombstoneFailureAction.GiveUp
+        result is ApiResult.HttpError && result.code == 423 -> TombstoneFailureAction.RetryLater
+        isRetryableFailure(result) -> TombstoneFailureAction.RetryLater
+        else -> TombstoneFailureAction.GiveUp
     }
 
 /** What a failed upload attempt means for the row. */

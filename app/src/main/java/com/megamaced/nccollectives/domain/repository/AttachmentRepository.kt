@@ -74,6 +74,16 @@ interface AttachmentRepository {
     ): ApiResult<Unit>
 
     /**
+     * B-103: give up on a delete the server won't carry out. Drops the
+     * tombstone and its staged bytes. Whatever the server holds stays there,
+     * and the next attachment listing shows it again, which is the truth.
+     */
+    suspend fun abandonDeletion(
+        pageId: Long,
+        fileName: String,
+    )
+
+    /**
      * Move a queued upload to the next free filename, after the server
      * refused to create it because something is already there (issue #24).
      *
