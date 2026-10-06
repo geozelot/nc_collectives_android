@@ -391,6 +391,45 @@ class EditFlushWorkerIntegrationTest {
         env.db.editQueueDao().deleteForPage(pageId)
     }
 
+    // --- B-95: a write that landed but was never recorded ---
+
+    @Test
+    fun aWriteThatLandedButWasNeverRecorded_settlesInsteadOfConflicting() =
+        runTest {
+            // A run was cancelled (or its read timed out) after the server had
+            // accepted the PUT: the row is still IN_FLIGHT against the old etag,
+            // and the server now holds exactly its text under a new one. The
+            // preflight used to see the moved etag and park the user's own
+            // write as a conflict against itself.
+            env.seedPage(id = 12, bodyMd = "server body", bodyEtag = "etag-1")
+            env.db.editQueueDao().upsert(queued(pageId = 12, body = "my offline edit", baseEtag = "etag-1"))
+            dispatcher.on(".md", serverBody("my offline edit", "etag-2"), method = "GET")
+
+            worker().doWork()
+
+            val row = env.db.pageDao().getById(12)
+            assertNull("there is no conflict: the server has the user's text", row?.draftBodyMd)
+            assertEquals("my offline edit", row?.bodyMd)
+            assertEquals("etag-2", row?.bodyEtag)
+            assertNull(env.db.editQueueDao().forPage(12))
+            assertTrue("and nothing needs writing again", dispatcher.requestsWithMethod("PUT").isEmpty())
+        }
+
+    @Test
+    fun aServerThatAlreadyHasTheQueuedText_isNotWrittenAgain() =
+        runTest {
+            // Same etag and same text: an edit that was reverted, or identical
+            // to the server's. A PUT would only add a version with no change.
+            env.seedPage(id = 12, bodyMd = "same", bodyEtag = "etag-1")
+            env.db.editQueueDao().upsert(queued(pageId = 12, body = "same", baseEtag = "etag-1"))
+            dispatcher.on(".md", serverBody("same", "etag-1"), method = "GET")
+
+            worker().doWork()
+
+            assertTrue(dispatcher.requestsWithMethod("PUT").isEmpty())
+            assertNull(env.db.editQueueDao().forPage(12))
+        }
+
     /** A WebDAV `GET` of a page body: what the flush preflight reads. */
     private fun serverBody(
         markdown: String,

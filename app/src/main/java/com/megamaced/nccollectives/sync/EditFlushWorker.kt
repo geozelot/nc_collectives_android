@@ -153,6 +153,21 @@ class EditFlushWorker
                     // still overwritten. Closing that properly means teaching
                     // the queue row to remember the body the edit was based
                     // on, which is a schema change.
+                    // B-95: the server already holds exactly this text. Either
+                    // an earlier attempt's PUT landed and its answer never came
+                    // back (a read timeout, or a run cancelled while the request
+                    // was out), or the edit matches what is there. Both ways
+                    // the write is done. Settle it as one, rather than PUTting
+                    // it again or, when the etag has moved because of that
+                    // very write, parking it as a conflict against itself.
+                    if (currentServer.data.markdown == entry.newBodyMd) {
+                        val outcome = withContext(NonCancellable) {
+                            recordPutOutcome(entry, ApiResult.Success(currentEtag), generation, attemptsSoFar)
+                        }
+                        if (outcome == FlushRowOutcome.RetryLater) retry = true
+                        if (outcome == FlushRowOutcome.SessionGone) return Result.success()
+                        continue
+                    }
                     if (currentEtag != entry.baseEtag) {
                         // Server moved on. Server wins; keep the user's
                         // body as a draft and flag the row.
