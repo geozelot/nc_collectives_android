@@ -1,6 +1,7 @@
 package com.megamaced.nccollectives.sync
 
 import android.content.Context
+import androidx.work.BackoffPolicy
 import androidx.work.Constraints
 import androidx.work.ExistingPeriodicWorkPolicy
 import androidx.work.ExistingWorkPolicy
@@ -115,6 +116,7 @@ class SyncScheduler
         fun flushEditsWhenOnline() {
             val oneShot = OneTimeWorkRequestBuilder<EditFlushWorker>()
                 .setConstraints(connectedConstraints)
+                .setBackoffCriteria(BackoffPolicy.LINEAR, FLUSH_BACKOFF_SECONDS, TimeUnit.SECONDS)
                 .build()
             workManager.enqueueUniqueWork(EDIT_FLUSH, ExistingWorkPolicy.APPEND_OR_REPLACE, oneShot)
         }
@@ -129,6 +131,7 @@ class SyncScheduler
         fun flushAttachmentUploadsWhenOnline() {
             val oneShot = OneTimeWorkRequestBuilder<AttachmentUploadWorker>()
                 .setConstraints(connectedConstraints)
+                .setBackoffCriteria(BackoffPolicy.LINEAR, FLUSH_BACKOFF_SECONDS, TimeUnit.SECONDS)
                 .build()
             workManager.enqueueUniqueWork(ATTACHMENT_FLUSH, ExistingWorkPolicy.APPEND_OR_REPLACE, oneShot)
         }
@@ -197,5 +200,17 @@ class SyncScheduler
             private const val ONE_SHOT_SYNC = "nc-collectives-sync-now"
             private const val EDIT_FLUSH = "nc-collectives-edit-flush"
             private const val ATTACHMENT_FLUSH = "nc-collectives-attachment-flush"
+
+            /**
+             * B-102: both flushes back off linearly from this, not on
+             * WorkManager's default exponential curve. Retries that never
+             * reach the server no longer spend a row's budget, so a long
+             * outage runs up many of them, and on the exponential curve the
+             * gap reached WorkManager's five-hour cap within ten. A save made
+             * once the server was back was queued (APPEND_OR_REPLACE) behind
+             * that wait. Linear keeps the gap at tens of minutes after a
+             * day-long outage.
+             */
+            private const val FLUSH_BACKOFF_SECONDS = 30L
         }
     }

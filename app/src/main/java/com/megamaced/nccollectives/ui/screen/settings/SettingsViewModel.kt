@@ -15,6 +15,7 @@ import com.megamaced.nccollectives.data.prefs.UserPreferences
 import com.megamaced.nccollectives.data.prefs.UserPrefs
 import com.megamaced.nccollectives.domain.model.Collective
 import com.megamaced.nccollectives.domain.repository.CollectiveRepository
+import com.megamaced.nccollectives.domain.repository.PageRepository
 import com.megamaced.nccollectives.sync.FullSync
 import com.megamaced.nccollectives.sync.SyncOutcome
 import com.megamaced.nccollectives.ui.screen.STOP_TIMEOUT_MS
@@ -101,6 +102,7 @@ class SettingsViewModel
         private val updateChecker: UpdateChecker,
         private val fullSync: FullSync,
         collectiveRepository: CollectiveRepository,
+        pageRepository: PageRepository,
     ) : ViewModel() {
         /**
          * Queued edits that have not reached the server, filled in by
@@ -119,6 +121,13 @@ class SettingsViewModel
             scope = viewModelScope,
             started = SharingStarted.WhileSubscribed(STOP_TIMEOUT_MS),
             initialValue = SyncStatus(),
+        )
+
+        /** B-102: queued edits not yet on the server, live. */
+        val unsentEditCount: StateFlow<Int> = pageRepository.observeUnsentEditCount().stateIn(
+            scope = viewModelScope,
+            started = SharingStarted.WhileSubscribed(STOP_TIMEOUT_MS),
+            initialValue = 0,
         )
 
         val uiState: StateFlow<SettingsUiState> = combine(

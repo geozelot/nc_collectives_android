@@ -36,3 +36,16 @@ fun syncStatusLines(
         ?.let { message -> "Last attempt ${relativeTimeAgo(status.lastFailureAt, now)} failed: $message" }
     return SyncStatusLines(summary = summary, error = error)
 }
+
+/**
+ * B-102: the line Settings adds while queued edits are waiting to reach the
+ * server, or null when nothing is waiting. Edits that can't reach the server
+ * wait instead of being parked as conflicts, so this is where the user sees
+ * them.
+ */
+fun unsentEditsLine(count: Int): String? =
+    when {
+        count <= 0 -> null
+        count == 1 -> "1 edit waiting to be sent"
+        else -> "$count edits waiting to be sent"
+    }

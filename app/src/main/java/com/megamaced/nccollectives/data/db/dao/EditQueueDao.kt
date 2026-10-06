@@ -79,6 +79,10 @@ interface EditQueueDao {
         newPageId: Long,
     )
 
+    /** B-102: give back the attempt [markInFlight] spent, for one that never reached the server. */
+    @Query("UPDATE edit_queue SET attempts = MAX(attempts - 1, 0) WHERE pageId = :pageId")
+    suspend fun refundAttempt(pageId: Long)
+
     @Query("UPDATE edit_queue SET status = :status WHERE pageId = :pageId")
     suspend fun setStatus(
         pageId: Long,
@@ -98,6 +102,10 @@ interface EditQueueDao {
      */
     @Query("SELECT COUNT(*) FROM edit_queue")
     suspend fun countAll(): Int
+
+    /** B-102: rows the flush worker still has to send. */
+    @Query("SELECT COUNT(*) FROM edit_queue WHERE status != 'CONFLICTED'")
+    fun observeUnsentCount(): Flow<Int>
 
     @Query("DELETE FROM edit_queue")
     suspend fun clear()

@@ -285,8 +285,23 @@ class EditFlushWorker
             entry: EditQueueEntity,
             result: ApiResult<*>,
             attemptsSoFar: Int,
-        ): FlushRowOutcome =
-            when (flushFailureAction(httpStatusOf(result), attemptsSoFar)) {
+        ): FlushRowOutcome {
+            // B-102: an attempt that never reached the server is no evidence
+            // against the edit, so it spends nothing and the edit waits. That
+            // covers a LAN- or VPN-only server seen from mobile data, or a
+            // server that is down, while WorkManager's CONNECTED constraint
+            // holds. Issue #30 budgeted these because a retry that never
+            // settles was invisible. Settings now counts the edits waiting
+            // (`PageRepository.observeUnsentEditCount`), and parking them as
+            // "conflicts" against a server that never refused anything was
+            // the worse surprise.
+            if (result is ApiResult.NetworkError) {
+                editQueueDao.refundAttempt(entry.pageId)
+                editQueueDao.setStatus(entry.pageId, "PENDING")
+                return FlushRowOutcome.RetryLater
+            }
+            val queuedFor = System.currentTimeMillis() - entry.queuedAt
+            return when (flushFailureAction(httpStatusOf(result), attemptsSoFar, queuedFor)) {
                 FlushFailureAction.Terminal -> {
                     parkAsConflict(entry)
                     FlushRowOutcome.Settled
@@ -297,6 +312,7 @@ class EditFlushWorker
                     FlushRowOutcome.RetryLater
                 }
             }
+        }
 
         /**
          * Give up on [entry] without discarding what the user wrote: the text
@@ -394,20 +410,34 @@ internal enum class FlushFailureAction {
 internal fun flushFailureAction(
     httpCode: Int?,
     runAttemptCount: Int,
+    queuedForMs: Long = Long.MAX_VALUE,
 ): FlushFailureAction =
     when {
-        runAttemptCount >= MAX_FLUSH_ATTEMPTS -> FlushFailureAction.Terminal
-        httpCode == null -> FlushFailureAction.RetryLater
-        httpCode == 408 || httpCode == 429 -> FlushFailureAction.RetryLater
-        httpCode in 400..499 -> FlushFailureAction.Terminal
+        httpCode == 408 || httpCode == 429 -> retryWithinBudget(runAttemptCount, queuedForMs)
+        httpCode != null && httpCode in 400..499 -> FlushFailureAction.Terminal
         httpCode == 507 -> FlushFailureAction.Terminal
-        else -> FlushFailureAction.RetryLater
+        else -> retryWithinBudget(runAttemptCount, queuedForMs)
     }
 
 /**
- * Attempts to spend on one queued edit before parking it as conflicted.
- * WorkManager's backoff is exponential and capped at five hours, so ten
- * attempts is already several days of trying.
+ * B-102: out of budget takes both the attempts and the time. Ten attempts on
+ * the flush's linear backoff are under half an hour, well inside a server's
+ * maintenance window. The row's own age is what makes the budget a day.
+ */
+private fun retryWithinBudget(
+    attempts: Int,
+    queuedForMs: Long,
+): FlushFailureAction =
+    if (attempts >= MAX_FLUSH_ATTEMPTS && queuedForMs >= FLUSH_PATIENCE_MS) {
+        FlushFailureAction.Terminal
+    } else {
+        FlushFailureAction.RetryLater
+    }
+
+/**
+ * Attempts to spend on one queued edit before parking it as conflicted,
+ * together with [FLUSH_PATIENCE_MS] of waiting (B-102). An attempt that never
+ * reached the server spends nothing: `EditFlushWorker` refunds it.
  *
  * Counted per *row*, in `EditQueueEntity.attempts`. Issue #30: it used to be
  * the worker's `runAttemptCount`, which belongs to the WorkRequest — so a row
@@ -416,6 +446,13 @@ internal fun flushFailureAction(
  * newer request that could have flushed it.
  */
 internal const val MAX_FLUSH_ATTEMPTS = 10
+
+/**
+ * B-102: how long a queued edit is retried against a server that answers
+ * with errors before it is parked, counted from when it was queued
+ * (`EditQueueEntity.queuedAt`, which coalescing keeps at the earliest).
+ */
+internal const val FLUSH_PATIENCE_MS = 24L * 60 * 60 * 1000
 
 /**
  * The HTTP status behind [result], or null when the failure never got one

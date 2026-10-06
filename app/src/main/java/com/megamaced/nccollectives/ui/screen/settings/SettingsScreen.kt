@@ -64,6 +64,7 @@ import com.megamaced.nccollectives.data.prefs.TextScale
 import com.megamaced.nccollectives.data.prefs.ThemeMode
 import com.megamaced.nccollectives.domain.model.Collective
 import com.megamaced.nccollectives.util.syncStatusLines
+import com.megamaced.nccollectives.util.unsentEditsLine
 
 private const val SOURCE_URL = "https://github.com/megamaced/nc_collectives_android"
 private const val LICENCE_URL = "https://www.gnu.org/licenses/agpl-3.0.html"
@@ -80,6 +81,7 @@ internal fun SettingsScreen(
     val updateCheck by viewModel.updateCheck.collectAsStateWithLifecycle()
     val syncStatus by viewModel.syncStatus.collectAsStateWithLifecycle()
     val manualSync by viewModel.manualSync.collectAsStateWithLifecycle()
+    val unsentEdits by viewModel.unsentEditCount.collectAsStateWithLifecycle()
     val context = LocalContext.current
     var showSignOutConfirm by remember { mutableStateOf(false) }
     // Account the user has asked to switch to / remove, held while the
@@ -256,6 +258,7 @@ internal fun SettingsScreen(
             SyncStatusRow(
                 status = syncStatus,
                 state = manualSync,
+                unsentEdits = unsentEdits,
                 onSyncNow = viewModel::syncNow,
             )
 
@@ -660,6 +663,7 @@ private fun LinkRow(
 private fun SyncStatusRow(
     status: SyncStatus,
     state: ManualSyncUiState,
+    unsentEdits: Int,
     onSyncNow: () -> Unit,
 ) {
     val syncing = state is ManualSyncUiState.Syncing
@@ -677,6 +681,13 @@ private fun SyncStatusRow(
                 text = message,
                 style = MaterialTheme.typography.bodySmall,
                 color = MaterialTheme.colorScheme.error,
+            )
+        }
+        unsentEditsLine(unsentEdits)?.let { line ->
+            Text(
+                text = line,
+                style = MaterialTheme.typography.bodySmall,
+                color = MaterialTheme.colorScheme.onSurfaceVariant,
             )
         }
         Row(

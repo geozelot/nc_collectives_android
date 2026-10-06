@@ -353,8 +353,16 @@ class AttachmentUploadWorker
             attachmentId: String,
             result: ApiResult<*>,
             attemptsSoFar: Int,
-        ): Boolean =
-            when (uploadFailureAction(result, attemptsSoFar)) {
+        ): Boolean {
+            // B-102: as for queued edits, an attempt that never reached the
+            // server spends nothing. The row stays "Waiting to upload" in
+            // the attachment sheet, which is where the user looks for it.
+            if (result is ApiResult.NetworkError) {
+                attachmentDao.refundAttempt(attachmentId)
+                attachmentDao.setStatus(attachmentId, AttachmentEntity.STATUS_PENDING)
+                return true
+            }
+            return when (uploadFailureAction(result, attemptsSoFar)) {
                 UploadFailureAction.RetryLater -> {
                     attachmentDao.setStatus(attachmentId, AttachmentEntity.STATUS_PENDING)
                     true
@@ -365,6 +373,7 @@ class AttachmentUploadWorker
                     false
                 }
             }
+        }
 
         private fun gcStaged(attachmentId: String) {
             val staged = AttachmentRepositoryImpl.stagedFileFor(appContext, attachmentId)
@@ -415,9 +424,9 @@ internal fun uploadFailureAction(
     }
 
 /**
- * Attempts to spend on one upload before marking it failed. Matches
- * [MAX_FLUSH_ATTEMPTS]: WorkManager's backoff is exponential and capped at
- * five hours, so ten attempts is already several days of trying. Counted per
- * row in `AttachmentEntity.attempts` (issue #30).
+ * Attempts to spend on one upload before marking it failed, counted per row
+ * in `AttachmentEntity.attempts` (issue #30). A failed upload keeps its bytes
+ * and offers Retry, so unlike an edit it needs no time budget on top. An
+ * attempt that never reached the server is refunded (B-102).
  */
 internal const val MAX_UPLOAD_ATTEMPTS = 10

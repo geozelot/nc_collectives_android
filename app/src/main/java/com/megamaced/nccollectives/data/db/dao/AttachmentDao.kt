@@ -50,6 +50,10 @@ interface AttachmentDao {
     @Query("UPDATE attachments SET status = 'UPLOADING', attempts = attempts + 1 WHERE id = :id")
     suspend fun markUploading(id: String)
 
+    /** B-102: give back the attempt the claim spent, for one that never reached the server. */
+    @Query("UPDATE attachments SET attempts = MAX(attempts - 1, 0) WHERE id = :id")
+    suspend fun refundAttempt(id: String)
+
     /**
      * Put a settled row back in the queue with a fresh budget. The user asked
      * for this one explicitly (issue #23), so it is not a continuation of the

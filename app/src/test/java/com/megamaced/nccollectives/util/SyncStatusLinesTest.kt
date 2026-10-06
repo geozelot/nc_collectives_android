@@ -104,4 +104,11 @@ class SyncStatusLinesTest {
         val lines = syncStatusLines(SyncStatus(lastSuccessAt = now + TimeUnit.HOURS.toMillis(3)), now)
         assertEquals("Last synced just now", lines.summary)
     }
+
+    @Test
+    fun unsentEdits_areCountedOnlyWhenThereAreAny() {
+        assertNull(unsentEditsLine(0))
+        assertEquals("1 edit waiting to be sent", unsentEditsLine(1))
+        assertEquals("3 edits waiting to be sent", unsentEditsLine(3))
+    }
 }
