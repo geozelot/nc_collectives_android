@@ -82,6 +82,7 @@ interface PageRepository {
     suspend fun saveBody(
         pageId: Long,
         newBody: String,
+        basedOn: String? = null,
     ): SaveOutcome
 
     /**

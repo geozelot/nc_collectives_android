@@ -10,6 +10,7 @@ import com.megamaced.nccollectives.domain.model.SaveOutcome
 import com.megamaced.nccollectives.domain.repository.AttachmentRepository
 import com.megamaced.nccollectives.domain.repository.PageRepository
 import com.megamaced.nccollectives.ui.navigation.Destination
+import com.megamaced.nccollectives.util.bodyFingerprint
 import dagger.hilt.android.lifecycle.HiltViewModel
 import kotlinx.coroutines.flow.MutableStateFlow
 import kotlinx.coroutines.flow.StateFlow
@@ -136,6 +137,9 @@ class PageEditViewModel
             if (body == null) return
             if (savedStateHandle.get<Boolean>(KEY_SEEDED) == true) return
             savedStateHandle[KEY_DRAFT] = body
+            // B-99: what the save is written against. Kept beside the draft
+            // so it survives the same restarts.
+            savedStateHandle[KEY_BASE] = bodyFingerprint(body)
             savedStateHandle[KEY_SEEDED] = true
         }
 
@@ -178,7 +182,11 @@ class PageEditViewModel
                 // longer passes a copy of the text in, so there is nothing to
                 // drift out of sync with a toolbar action that forgot to
                 // report its result.
-                val outcome = repository.saveBody(pageId, draftBody.value)
+                val outcome = repository.saveBody(
+                    pageId,
+                    draftBody.value,
+                    basedOn = savedStateHandle.get<String>(KEY_BASE),
+                )
                 _uiState.update {
                     when (outcome) {
                         SaveOutcome.Saved, SaveOutcome.Queued -> {
@@ -211,5 +219,8 @@ class PageEditViewModel
 
             /** Whether [KEY_DRAFT] has been filled from the loaded body yet. */
             const val KEY_SEEDED = "pageEdit.seeded"
+
+            /** B-99: fingerprint of the body [KEY_DRAFT] was seeded from. */
+            const val KEY_BASE = "pageEdit.base"
         }
     }

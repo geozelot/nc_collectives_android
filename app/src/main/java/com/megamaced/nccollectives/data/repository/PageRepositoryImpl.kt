@@ -33,6 +33,7 @@ import com.megamaced.nccollectives.domain.model.SaveOutcome
 import com.megamaced.nccollectives.domain.repository.AttachmentRepository
 import com.megamaced.nccollectives.domain.repository.PageRepository
 import com.megamaced.nccollectives.sync.SyncScheduler
+import com.megamaced.nccollectives.util.bodyFingerprint
 import com.megamaced.nccollectives.util.retargetAttachmentRefs
 import dagger.Lazy
 import kotlinx.coroutines.ExperimentalCoroutinesApi
@@ -412,12 +413,24 @@ class PageRepositoryImpl
         override suspend fun saveBody(
             pageId: Long,
             newBody: String,
+            basedOn: String?,
         ): SaveOutcome {
             val entity = pageDao.getById(pageId)
                 ?: return SaveOutcome.Error("Page not cached")
             // Issue #29: the precondition comes from the queue row when there
             // is one, not from the page row. See `savePrecondition`.
             val existing = editQueueDao.forPage(pageId)
+            // B-99: the editor says which body it was opened on. If the page
+            // has moved since (a share appended, a link repointed by the
+            // upload worker), this save was written without that change, and
+            // the precondition below would be read off the moved page row
+            // and match. Park it as a conflict instead, as a 412 would.
+            if (basedOn != null) {
+                val current = existing?.takeIf { it.status != "CONFLICTED" }?.newBodyMd ?: entity.bodyMd
+                if (current == null || bodyFingerprint(current) != basedOn) {
+                    return parkEditOverMovedPage(pageId, entity.bodyEtag, existing, newBody)
+                }
+            }
             val precondition = savePrecondition(existing, entity.bodyEtag)
             val result = bodyService.saveBody(
                 collectivePath = entity.collectivePath,
@@ -439,8 +452,12 @@ class PageRepositoryImpl
                         // worker repointing a link, and it used to delete
                         // the draft regardless. The CONFLICTED row stays
                         // too, because it is what keeps B-19's guard armed.
+                        //
+                        // B-99: and no draft is cleared here at all. Since
+                        // an editor save over a moved page parks beside a
+                        // PENDING row (`parkEditOverMovedPage`), a draft no
+                        // longer implies a CONFLICTED row.
                         if (existing?.status != "CONFLICTED") {
-                            pageDao.updateDraft(pageId, null)
                             editQueueDao.deleteForPage(pageId)
                         }
                     }
@@ -611,9 +628,61 @@ class PageRepositoryImpl
             // the text away, and a `CONFLICTED` row left behind would keep
             // the B-19 guard armed forever — every later offline save on this
             // page would report a conflict for a draft that no longer exists.
+            //
+            // B-99: but only a CONFLICTED row, which is the draft's marker. A
+            // PENDING row beside a draft holds different text, such as a
+            // share queued offline while the editor was open, and discarding
+            // the draft is no instruction to discard that.
             database.withTransaction {
                 pageDao.updateDraft(pageId, null)
-                editQueueDao.deleteForPage(pageId)
+                if (editQueueDao.forPage(pageId)?.status == "CONFLICTED") {
+                    editQueueDao.deleteForPage(pageId)
+                }
+            }
+        }
+
+        /**
+         * B-99: park an editor save made over a page that has moved since the
+         * editor opened. The text becomes the draft the ConflictBanner offers,
+         * and the page keeps whatever moved it.
+         *
+         * Next to a PENDING row (a share captured offline, say) the row is
+         * left alone, because it holds that other text. With no row at all, a
+         * CONFLICTED one is added, as the 412 path does, to arm B-19's guard.
+         *
+         * There is one draft slot, so a page that already has a draft refuses
+         * instead: parking would overwrite the earlier draft. The editor stays
+         * open with the text on screen and says why.
+         */
+        private suspend fun parkEditOverMovedPage(
+            pageId: Long,
+            pageEtag: String?,
+            existing: EditQueueEntity?,
+            newBody: String,
+        ): SaveOutcome {
+            val parked = database.withTransaction {
+                if (pageDao.getById(pageId)?.draftBodyMd != null) return@withTransaction false
+                pageDao.updateDraft(pageId, newBody)
+                if (existing == null) {
+                    editQueueDao.upsert(
+                        EditQueueEntity(
+                            pageId = pageId,
+                            baseEtag = pageEtag,
+                            newBodyMd = newBody,
+                            queuedAt = System.currentTimeMillis(),
+                            status = "CONFLICTED",
+                        ),
+                    )
+                }
+                true
+            }
+            return if (parked) {
+                SaveOutcome.Conflict
+            } else {
+                SaveOutcome.Error(
+                    "This page changed while you were editing, and it already has an unresolved draft. " +
+                        "Copy your text, resolve the draft on the page, then edit again.",
+                )
             }
         }
 
