@@ -13,6 +13,7 @@ import androidx.compose.runtime.Composable
 import androidx.compose.runtime.LaunchedEffect
 import androidx.compose.runtime.getValue
 import androidx.compose.runtime.mutableStateOf
+import androidx.compose.runtime.produceState
 import androidx.compose.runtime.saveable.rememberSaveable
 import androidx.compose.runtime.setValue
 import androidx.compose.ui.Alignment
@@ -23,6 +24,7 @@ import androidx.lifecycle.ViewModel
 import androidx.lifecycle.compose.collectAsStateWithLifecycle
 import androidx.navigation.compose.currentBackStackEntryAsState
 import androidx.navigation.compose.rememberNavController
+import com.megamaced.nccollectives.data.auth.AccountSwitcher
 import com.megamaced.nccollectives.data.auth.AuthState
 import com.megamaced.nccollectives.data.auth.SessionManager
 import com.megamaced.nccollectives.data.prefs.UserPreferences
@@ -44,9 +46,18 @@ internal class AuthGateViewModel
         sharePayloadHolder: SharePayloadHolder,
         private val userPreferences: UserPreferences,
         private val collectiveRepository: CollectiveRepository,
+        private val accountSwitcher: AccountSwitcher,
     ) : ViewModel() {
         val authState = sessionManager.authState
         val sharePayload: StateFlow<SharePayload?> = sharePayloadHolder.payload
+
+        /** B-92: queued edits an expired account is holding, for the re-auth prompt. */
+        suspend fun pendingEditCount(): Int = accountSwitcher.pendingEditCount()
+
+        fun retryExpiredSession() = accountSwitcher.retryExpiredSession()
+
+        /** Goes through the ordinary removal, wipe included, which the prompt confirms first. */
+        fun removeAccount(accountId: String) = accountSwitcher.removeAccount(accountId)
 
         /**
          * Collective to open straight into on launch, or null to stay on the
@@ -88,7 +99,7 @@ internal fun NcCollectivesScaffold(viewModel: AuthGateViewModel = hiltViewModel(
     val authState by viewModel.authState.collectAsStateWithLifecycle()
     val sharePayload by viewModel.sharePayload.collectAsStateWithLifecycle()
 
-    when (authState) {
+    when (val state = authState) {
         AuthState.Unknown -> {
             Box(
                 modifier = Modifier.fillMaxSize(),
@@ -100,6 +111,21 @@ internal fun NcCollectivesScaffold(viewModel: AuthGateViewModel = hiltViewModel(
 
         AuthState.Unauthenticated -> {
             LoginScreen()
+        }
+
+        // B-92: mounted in place of the authenticated host, like `Switching`,
+        // so nothing makes requests with the rejected credential while the
+        // user decides. Everything cached for the account stays.
+        is AuthState.ReauthRequired -> {
+            val pendingEdits by produceState(initialValue = 0, state.account.id) {
+                value = viewModel.pendingEditCount()
+            }
+            LoginScreen(
+                reauthAccount = state.account,
+                pendingEdits = pendingEdits,
+                onRetry = viewModel::retryExpiredSession,
+                onRemoveAccount = { viewModel.removeAccount(state.account.id) },
+            )
         }
 
         // Mounted in place of the authenticated host, which is what tears

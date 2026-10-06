@@ -28,6 +28,22 @@ sealed interface AuthState {
      * — the same ordering `LogoutHandler` relies on.
      */
     data object Switching : AuthState
+
+    /**
+     * B-92: the server rejected [account]'s credential, and the user hasn't
+     * signed in again yet.
+     *
+     * Not [Unauthenticated]: the account, its credential and everything
+     * cached for it stay on the device. That includes the edit queue,
+     * conflict drafts and staged uploads, which exist nowhere else. The
+     * scaffold unmounts the authenticated host on this state, as it does on
+     * [Switching], and asks for a fresh sign-in to the same account. That
+     * goes through `AccountSwitcher.signInTo`'s same-account path, which
+     * keeps the cache.
+     */
+    data class ReauthRequired(
+        val account: AccountSummary,
+    ) : AuthState
 }
 
 @Singleton
@@ -70,18 +86,59 @@ class SessionManager
          */
         private val authFailures = AuthFailureTracker()
 
+        /**
+         * B-92: the account whose credential the server rejected, until the
+         * user signs in again, retries, or the active account changes.
+         * Written from an OkHttp thread, read wherever [refreshState] runs.
+         *
+         * Deliberately not persisted. A cold start retries the stored
+         * credential, which is also how a transient outage (an LDAP backend
+         * restarting, say) clears itself without the user doing anything.
+         */
+        @Volatile
+        private var reauthAccountId: String? = null
+
         init {
             refreshState()
         }
 
         fun refreshState() {
-            _accounts.value = tokenStore.accounts()
-            _activeAccountId.value = tokenStore.activeAccountId()
-            _authState.value = if (tokenStore.getCredentials() != null) {
-                AuthState.Authenticated
-            } else {
-                AuthState.Unauthenticated
+            val accounts = tokenStore.accounts()
+            val activeId = tokenStore.activeAccountId()
+            _accounts.value = accounts
+            _activeAccountId.value = activeId
+            val needsReauth = reauthAccountId
+                ?.takeIf { it == activeId }
+                ?.let { id -> accounts.firstOrNull { it.id == id } }
+            _authState.value = when {
+                tokenStore.getCredentials() == null -> AuthState.Unauthenticated
+                needsReauth != null -> AuthState.ReauthRequired(needsReauth)
+                else -> AuthState.Authenticated
             }
+        }
+
+        /**
+         * B-92: the server has rejected [accountId]'s credential. Ask the user
+         * to sign in again instead of removing the account. No-op unless it
+         * is still the active account, because the streak is detected on an
+         * OkHttp thread and a switch can land first.
+         */
+        fun requireReauthentication(accountId: String) {
+            if (accountId != tokenStore.activeAccountId()) return
+            reauthAccountId = accountId
+            refreshState()
+        }
+
+        /**
+         * B-92: try the stored credential again, for when the 401s were a
+         * passing outage rather than a revoked app password. A credential
+         * that really is dead fails twice more and lands back in
+         * [AuthState.ReauthRequired].
+         */
+        fun retryAuthentication() {
+            reauthAccountId = null
+            authFailures.reset()
+            refreshState()
         }
 
         /** Called from [LogoutHandler] before it touches local state. */
@@ -93,6 +150,7 @@ class SessionManager
         /** Called from [LogoutHandler] once the local wipe is complete. */
         fun endSignOut() {
             tokenStore.clear()
+            reauthAccountId = null
             authFailures.reset()
             sessionChangeInProgress.set(false)
             refreshState()
@@ -116,6 +174,7 @@ class SessionManager
          * of the last account.
          */
         fun endAccountSwitch() {
+            reauthAccountId = null
             authFailures.reset()
             sessionChangeInProgress.set(false)
             refreshState()
@@ -135,6 +194,7 @@ class SessionManager
             appPassword: String,
         ) {
             tokenStore.upsertAndActivate(host, loginName, appPassword)
+            reauthAccountId = null
             authFailures.reset()
             sessionChangeInProgress.set(false)
             refreshState()

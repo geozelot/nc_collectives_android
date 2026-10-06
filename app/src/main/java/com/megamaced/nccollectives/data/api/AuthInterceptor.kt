@@ -1,5 +1,6 @@
 package com.megamaced.nccollectives.data.api
 
+import com.megamaced.nccollectives.data.auth.AuthState
 import com.megamaced.nccollectives.data.auth.SessionManager
 import com.megamaced.nccollectives.data.auth.TokenStore
 import com.megamaced.nccollectives.data.auth.serverHostOf
@@ -42,8 +43,15 @@ class AuthInterceptor
             val original = chain.request()
             val credentials = tokenStore.getCredentials()
             val vouchedFor = original.tag(RequestOrigin::class.java) != null
+            // B-92: not while the server has rejected the credential. Every
+            // further attempt with it counts against Nextcloud's brute-force
+            // throttle, which would then slow down the very sign-in that
+            // fixes it. The request still goes out unsigned, so callers see
+            // the 401 they already handle.
+            val suspended = sessionManager.authState.value is AuthState.ReauthRequired
             val attach = credentials != null &&
                 vouchedFor &&
+                !suspended &&
                 hostMatches(original.url.host, credentials.host)
             val request = if (attach) {
                 checkNotNull(credentials)
