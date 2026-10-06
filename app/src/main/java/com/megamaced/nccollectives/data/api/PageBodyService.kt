@@ -2,8 +2,12 @@ package com.megamaced.nccollectives.data.api
 
 import com.megamaced.nccollectives.data.ServerStringValidation
 import com.megamaced.nccollectives.data.auth.TokenStore
+import kotlinx.coroutines.CancellationException
 import kotlinx.coroutines.Dispatchers
+import kotlinx.coroutines.suspendCancellableCoroutine
 import kotlinx.coroutines.withContext
+import okhttp3.Call
+import okhttp3.Callback
 import okhttp3.HttpUrl.Companion.toHttpUrlOrNull
 import okhttp3.MediaType.Companion.toMediaType
 import okhttp3.OkHttpClient
@@ -13,6 +17,7 @@ import okhttp3.RequestBody.Companion.toRequestBody
 import timber.log.Timber
 import javax.inject.Inject
 import javax.inject.Singleton
+import kotlin.coroutines.resumeWithException
 
 /** A page body along with the WebDAV ETag the server returned for it. */
 data class PageBody(
@@ -267,7 +272,7 @@ class PageBodyService
         ): ApiResult<T> =
             withContext(Dispatchers.IO) {
                 try {
-                    client.newCall(request).execute().use { response ->
+                    client.newCall(request).await().use { response ->
                         when {
                             response.code in 200..299 || response.code in extraSuccessCodes -> {
                                 ApiResult.Success(onSuccess(response))
@@ -286,11 +291,49 @@ class PageBodyService
                             }
                         }
                     }
+                } catch (e: CancellationException) {
+                    throw e
                 } catch (e: java.io.IOException) {
                     ApiResult.NetworkError(e)
                 } catch (e: Exception) {
                     ApiResult.Unexpected(e)
                 }
+            }
+
+        /**
+         * B-95: [Call.execute], except that cancelling the caller cancels the
+         * call.
+         *
+         * A blocking `execute()` ignores coroutine cancellation. A cancelled
+         * caller sat in it until the server answered, and then threw the
+         * answer away. For a PUT, that was the worst of both outcomes: the
+         * write landed and nothing recorded it. The account wipe (issue #20)
+         * and WorkManager stopping a worker both assume cancellation stops
+         * the request. Whether a write the server had already started
+         * reading lands is still up to the server, which is why the flush
+         * and the foreground save also recognise their own landed text
+         * (`EditFlushWorker`, `PageRepositoryImpl.saveBody`).
+         */
+        private suspend fun Call.await(): okhttp3.Response =
+            suspendCancellableCoroutine { continuation ->
+                continuation.invokeOnCancellation { cancel() }
+                enqueue(
+                    object : Callback {
+                        override fun onFailure(
+                            call: Call,
+                            e: java.io.IOException,
+                        ) {
+                            continuation.resumeWithException(e)
+                        }
+
+                        override fun onResponse(
+                            call: Call,
+                            response: okhttp3.Response,
+                        ) {
+                            continuation.resume(response) { _, value, _ -> value.close() }
+                        }
+                    },
+                )
             }
 
         /**

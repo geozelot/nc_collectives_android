@@ -491,6 +491,19 @@ class PageRepositoryImpl
                         // next revalidation on open advances the body.
                         else -> null
                     }
+                    // B-95: refused by our own earlier write. A save whose
+                    // response never came back (a read timeout after the
+                    // server took it) leaves the page row on the old etag, so
+                    // saving the same text again 412s against itself. If the
+                    // server holds exactly what is being saved, it is saved.
+                    if (fresh != null && fresh.markdown == newBody) {
+                        database.withTransaction {
+                            pageDao.updateBody(pageId, newBody, fresh.etag, System.currentTimeMillis())
+                            pageDao.updateDraft(pageId, null)
+                            editQueueDao.deleteForPage(pageId)
+                        }
+                        return SaveOutcome.Saved
+                    }
                     database.withTransaction {
                         if (fresh != null) {
                             pageDao.updateBody(
