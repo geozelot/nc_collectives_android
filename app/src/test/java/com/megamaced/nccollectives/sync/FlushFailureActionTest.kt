@@ -70,6 +70,26 @@ class FlushFailureActionTest {
     }
 
     @Test
+    fun aServerErrorBudget_isAlsoADayOfTrying() {
+        // B-102: ten attempts on a short backoff is under an hour, well inside
+        // a server's maintenance window. The cap only bites once the edit has
+        // also been waiting a day.
+        assertEquals(
+            FlushFailureAction.RetryLater,
+            flushFailureAction(503, runAttemptCount = MAX_FLUSH_ATTEMPTS, queuedForMs = FLUSH_PATIENCE_MS - 1),
+        )
+        assertEquals(
+            FlushFailureAction.Terminal,
+            flushFailureAction(503, runAttemptCount = MAX_FLUSH_ATTEMPTS, queuedForMs = FLUSH_PATIENCE_MS),
+        )
+        // A refusal is still a refusal on the first attempt.
+        assertEquals(
+            FlushFailureAction.Terminal,
+            flushFailureAction(404, runAttemptCount = 1, queuedForMs = 0),
+        )
+    }
+
+    @Test
     fun httpStatusOf_readsTheStatusOrAdmitsThereIsNone() {
         assertEquals(404, httpStatusOf(ApiResult.HttpError(404, "Not Found")))
         // `webDavCall` folds 412 into its own arm; the classifier still needs
@@ -81,13 +101,13 @@ class FlushFailureActionTest {
     }
 
     @Test
-    fun `a dropped network waits, and is now inside the budget`() {
-        // Issue #30: NetworkError used to go straight back to PENDING
-        // without consulting this at all, so a device that satisfies
-        // WorkManager's CONNECTED constraint while the server times out
-        // retried forever -- invisibly, since only a settled row puts
-        // anything on screen. A null status is what a NetworkError presents
-        // as, so the cap now reaches it.
+    fun `a failure with no status at all is inside the budget`() {
+        // Issue #30 put every statusless failure through the cap, a dropped
+        // network included. B-102 takes the network back out: EditFlushWorker
+        // refunds an attempt that never reached the server before this is
+        // consulted (UnreachableServerIntegrationTest). What still arrives here
+        // with no status is an `Unexpected`, such as a WebDAV URL that can't be
+        // built, and the cap still reaches that.
         assertEquals(FlushFailureAction.RetryLater, flushFailureAction(httpCode = null, runAttemptCount = 1))
         assertEquals(
             FlushFailureAction.Terminal,

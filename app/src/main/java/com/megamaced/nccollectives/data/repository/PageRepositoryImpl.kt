@@ -430,6 +430,8 @@ class PageRepositoryImpl
             }
         }
 
+        override fun observeUnsentEditCount(): Flow<Int> = editQueueDao.observeUnsentCount()
+
         override suspend fun saveBody(
             pageId: Long,
             newBody: String,

@@ -75,10 +75,17 @@ interface PageRepository {
     suspend fun refreshBodyIfChanged(pageId: Long): ApiResult<Boolean>
 
     /**
+     * B-102: queued edits still waiting to reach the server, not counting
+     * parked conflicts, which wait on the user instead.
+     */
+    fun observeUnsentEditCount(): Flow<Int>
+
+    /**
      * Tries to save [newBody] to the server now. On network failure the edit
      * is enqueued for `EditFlushWorker` to retry; on 412 the user's body is
      * stored as a draft on the page row and `Conflict` is returned.
      */
+
     suspend fun saveBody(
         pageId: Long,
         newBody: String,
