@@ -112,4 +112,20 @@ class UploadFailureActionTest {
             action(ApiResult.HttpError(code = 503, message = "Service Unavailable"), attempt = 1),
         )
     }
+
+    @Test
+    fun aTombstoneDelete_isGivenUpOnlyOnARefusalOrAnEmptyBudget() {
+        // B-103.
+        assertEquals(TombstoneFailureAction.GiveUp, tombstoneFailureAction(ApiResult.HttpError(403, "Forbidden"), 1))
+        assertEquals(TombstoneFailureAction.RetryLater, tombstoneFailureAction(ApiResult.HttpError(503, "Unavailable"), 1))
+        assertEquals(TombstoneFailureAction.RetryLater, tombstoneFailureAction(ApiResult.HttpError(423, "Locked"), 1))
+        assertEquals(
+            TombstoneFailureAction.RetryFree,
+            tombstoneFailureAction(ApiResult.NetworkError(IOException("down")), MAX_UPLOAD_ATTEMPTS),
+        )
+        assertEquals(
+            TombstoneFailureAction.GiveUp,
+            tombstoneFailureAction(ApiResult.HttpError(503, "Unavailable"), MAX_UPLOAD_ATTEMPTS),
+        )
+    }
 }
