@@ -315,7 +315,7 @@ interface PageDao {
     )
     suspend fun idsHoldingUnsyncedWork(collectiveId: Long): List<Long>
 
-    /** Callers keep [ids] under SQLite's bound-argument limit, see `RECONCILE_DELETE_CHUNK`. */
+    /** Callers keep [ids] under SQLite's bound-argument limit, see `SQLITE_IN_LIST_CHUNK`. */
     @Query("DELETE FROM pages WHERE id IN (:ids)")
     suspend fun deleteByIds(ids: List<Long>)
 
