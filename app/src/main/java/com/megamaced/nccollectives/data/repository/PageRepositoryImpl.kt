@@ -441,9 +441,22 @@ class PageRepositoryImpl
             )
             return when (result) {
                 is ApiResult.Success -> {
-                    pageDao.updateBody(pageId, newBody, result.data, System.currentTimeMillis())
-                    pageDao.updateDraft(pageId, null)
-                    editQueueDao.deleteForPage(pageId)
+                    database.withTransaction {
+                        pageDao.updateBody(pageId, newBody, result.data, System.currentTimeMillis())
+                        // B-97: an unresolved conflict stays unresolved. Its
+                        // draft is the user's own text, parked when a write
+                        // lost an etag race, and the banner's Replace and
+                        // Discard are what settle it. This write wasn't
+                        // either. It was the editor working on the server's
+                        // body, a share appended to the page, or the upload
+                        // worker repointing a link, and it used to delete
+                        // the draft regardless. The CONFLICTED row stays
+                        // too, because it is what keeps B-19's guard armed.
+                        if (existing?.status != "CONFLICTED") {
+                            pageDao.updateDraft(pageId, null)
+                            editQueueDao.deleteForPage(pageId)
+                        }
+                    }
                     SaveOutcome.Saved
                 }
 
