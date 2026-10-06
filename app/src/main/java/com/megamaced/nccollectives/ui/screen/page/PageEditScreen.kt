@@ -65,6 +65,7 @@ import androidx.hilt.navigation.compose.hiltViewModel
 import androidx.lifecycle.compose.collectAsStateWithLifecycle
 import com.megamaced.nccollectives.ui.attachment.rememberCameraCapture
 import com.megamaced.nccollectives.ui.attachment.uriDisplayName
+import com.megamaced.nccollectives.ui.components.ErrorState
 import com.megamaced.nccollectives.ui.components.LoadingState
 import com.megamaced.nccollectives.ui.components.MarkdownView
 import com.megamaced.nccollectives.ui.components.SnackbarStatusEffect
@@ -146,7 +147,9 @@ internal fun PageEditScreen(
 
     SnackbarStatusEffect(ui.saveError, snackbarHostState, viewModel::dismissError)
 
-    val hasUnsavedChanges = ui.initialBody != null && draftBody != ui.initialBody
+    // B-94: keyed on `canEdit` rather than on a loaded `initialBody`, so a
+    // draft restored over a body that is no longer cached still counts.
+    val hasUnsavedChanges = ui.canEdit && draftBody != ui.initialBody.orEmpty()
     val tryClose: () -> Unit = {
         if (hasUnsavedChanges) showDiscardPrompt = true else onClose()
     }
@@ -254,7 +257,7 @@ internal fun PageEditScreen(
                     }
                     IconButton(
                         onClick = viewModel::save,
-                        enabled = !ui.isSaving && !ui.isLoadingBody,
+                        enabled = !ui.isSaving && !ui.isLoadingBody && ui.canEdit,
                     ) {
                         if (ui.isSaving) {
                             CircularProgressIndicator(
@@ -280,6 +283,15 @@ internal fun PageEditScreen(
             when {
                 ui.isLoadingBody -> {
                     LoadingState()
+                }
+
+                // B-94: a blank field here would be an invitation to
+                // overwrite a page nobody on this device has seen.
+                !ui.canEdit -> {
+                    ErrorState(
+                        message = ui.loadError ?: "Couldn't load this page.",
+                        onRetry = viewModel::retryLoad,
+                    )
                 }
 
                 previewing -> {

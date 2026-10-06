@@ -36,6 +36,16 @@ data class PageEditUiState(
      * screen now holds the close until this has been shown.
      */
     val saveNotice: String? = null,
+    /**
+     * B-94: whether there is a body to edit, either loaded now or seeded into
+     * the draft earlier. False after a failed fetch with no cached copy: the
+     * screen then shows a retry instead of a blank field, and [PageEditViewModel.save]
+     * refuses. Writing over a body this device has never seen has no ETag
+     * to send, so it would be a blind overwrite of the whole page.
+     */
+    val canEdit: Boolean = false,
+    /** Why there is nothing to edit, shown in place of the editor with a retry. */
+    val loadError: String? = null,
 )
 
 @HiltViewModel
@@ -77,6 +87,16 @@ class PageEditViewModel
         val draftBody: StateFlow<String> = savedStateHandle.getStateFlow(KEY_DRAFT, "")
 
         init {
+            load()
+        }
+
+        /** B-94: the editor's way out when the first load found nothing to edit. */
+        fun retryLoad() {
+            if (_uiState.value.isLoadingBody) return
+            load()
+        }
+
+        private fun load() {
             viewModelScope.launch {
                 // R-37: keep the spinner up across both getPage AND fetchBody,
                 // and stage `initialBody` exactly once at the end. The
@@ -102,18 +122,23 @@ class PageEditViewModel
                 }
                 _imageBaseUrl.value = attachmentRepository.attachmentsBaseUrl(pageId)
                 seedDraft(current?.bodyMd)
+                val canEdit = savedStateHandle.get<Boolean>(KEY_SEEDED) == true
                 _uiState.update {
                     it.copy(
                         title = current?.title.orEmpty(),
                         initialBody = current?.bodyMd,
                         isLoadingBody = false,
+                        canEdit = canEdit,
                         // Only complain when there's nothing to edit. A failed
                         // revalidation over a cached body is the offline case,
                         // and the editor still works there — the save path
                         // queues the edit for `EditFlushWorker`.
-                        saveError = refreshed
-                            ?.takeIf { it !is ApiResult.Success<*> && current?.bodyMd == null }
-                            ?.userMessage(),
+                        loadError = if (canEdit) {
+                            null
+                        } else {
+                            refreshed?.takeIf { r -> r !is ApiResult.Success<*> }?.userMessage()
+                                ?: "Couldn't load this page. Check your connection and try again."
+                        },
                     )
                 }
             }
@@ -172,6 +197,9 @@ class PageEditViewModel
 
         fun save() {
             if (_uiState.value.isSaving) return
+            // B-94: nothing loaded means nothing to write against. The screen
+            // offers no Save then; this holds the line for any other caller.
+            if (!_uiState.value.canEdit) return
             _uiState.update { it.copy(isSaving = true, saveError = null, saveNotice = null) }
             viewModelScope.launch {
                 // The draft is the single source of truth — the screen no
