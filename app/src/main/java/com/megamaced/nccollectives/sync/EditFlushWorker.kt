@@ -258,7 +258,13 @@ class EditFlushWorker
                             result.data,
                             System.currentTimeMillis(),
                         )
-                        pageDao.updateDraft(entry.pageId, null)
+                        // B-99: only a draft this write has just put on the
+                        // server is resolved by it. Anything else beside a
+                        // PENDING row is different text, such as an editor
+                        // save parked over a moved page, and the banner owns it.
+                        if (pageDao.getById(entry.pageId)?.draftBodyMd == entry.newBodyMd) {
+                            pageDao.updateDraft(entry.pageId, null)
+                        }
                         val survivor = settledQueueRow(
                             current = editQueueDao.forPage(entry.pageId),
                             flushedBody = entry.newBodyMd,
