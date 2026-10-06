@@ -279,10 +279,14 @@ class CollectiveRepositoryImpl
          */
         private suspend fun cascadeForCollectives(collectiveIds: List<Long>) {
             for (collectiveId in collectiveIds) {
-                val pageIds = pageDao.idsForCollective(collectiveId)
-                if (pageIds.isNotEmpty()) {
-                    attachmentDao.deleteForPageIds(pageIds)
-                    editQueueDao.deleteForPageIds(pageIds)
+                // B-101: in batches. A collective of a thousand pages or more
+                // put every id into one statement, past the 999 bound
+                // arguments API 29–30's SQLite accepts. The crash took the
+                // whole refresh down with it, so that account never synced
+                // again.
+                for (chunk in pageDao.idsForCollective(collectiveId).chunked(SQLITE_IN_LIST_CHUNK)) {
+                    attachmentDao.deleteForPageIds(chunk)
+                    editQueueDao.deleteForPageIds(chunk)
                 }
                 pageDao.deleteForCollective(collectiveId)
             }

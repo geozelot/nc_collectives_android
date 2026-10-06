@@ -5,11 +5,14 @@ import com.megamaced.nccollectives.data.db.dao.EditQueueDao
 import com.megamaced.nccollectives.data.db.dao.PageDao
 
 /**
- * How many ids one reconcile `DELETE … IN (…)` binds. SQLite before 3.32,
- * which is what API 29–30 ship, rejects a statement with more than 999 bound
- * arguments, and minSdk is 29.
+ * How many ids one `… IN (:ids)` statement binds. Room expands the list to one
+ * argument per element, and SQLite before 3.32, which is what API 29–30 ship,
+ * rejects a statement with more than 999 bound arguments; minSdk is 29.
+ * Every caller handing a list of unbounded length to such a query batches it
+ * by this (B-101). The JVM tests run on a host SQLite with a far higher
+ * limit, so only an explicit batch keeps this honest.
  */
-internal const val RECONCILE_DELETE_CHUNK = 500
+internal const val SQLITE_IN_LIST_CHUNK = 500
 
 /**
  * B-91: which of [unlisted] (cached pages a server listing no longer names)
@@ -46,7 +49,7 @@ internal fun reconcilableDeletions(
 /**
  * Delete [pageIds] together with their attachment and edit-queue rows, which
  * Room won't cascade because no entity declares a foreign key (B-66). Chunked
- * under [RECONCILE_DELETE_CHUNK].
+ * under [SQLITE_IN_LIST_CHUNK].
  *
  * Caller must already hold a transaction.
  */
@@ -56,7 +59,7 @@ internal suspend fun deletePagesWithTheirRows(
     attachmentDao: AttachmentDao,
     editQueueDao: EditQueueDao,
 ) {
-    for (chunk in pageIds.chunked(RECONCILE_DELETE_CHUNK)) {
+    for (chunk in pageIds.chunked(SQLITE_IN_LIST_CHUNK)) {
         attachmentDao.deleteForPageIds(chunk)
         editQueueDao.deleteForPageIds(chunk)
         pageDao.deleteByIds(chunk)
