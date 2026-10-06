@@ -525,8 +525,13 @@ class PageRepositoryImpl
                     if (fresh != null && fresh.markdown == newBody) {
                         database.withTransaction {
                             pageDao.updateBody(pageId, newBody, fresh.etag, System.currentTimeMillis())
-                            pageDao.updateDraft(pageId, null)
-                            editQueueDao.deleteForPage(pageId)
+                            // B-97, as on the success branch: a write that
+                            // landed resolves nothing about an unrelated
+                            // conflict draft.
+                            if (existing?.status != "CONFLICTED") {
+                                pageDao.updateDraft(pageId, null)
+                                editQueueDao.deleteForPage(pageId)
+                            }
                         }
                         return SaveOutcome.Saved
                     }
