@@ -3,6 +3,7 @@ package com.megamaced.nccollectives.ui.screen.page
 import android.annotation.SuppressLint
 import android.content.Context
 import android.content.Intent
+import android.graphics.Bitmap
 import android.net.Uri
 import android.net.http.SslError
 import android.view.ViewGroup
@@ -55,6 +56,7 @@ import androidx.compose.ui.graphics.luminance
 import androidx.compose.ui.platform.LocalContext
 import androidx.compose.ui.unit.dp
 import androidx.compose.ui.viewinterop.AndroidView
+import androidx.core.net.toUri
 import androidx.hilt.navigation.compose.hiltViewModel
 import androidx.lifecycle.compose.collectAsStateWithLifecycle
 import androidx.webkit.WebSettingsCompat
@@ -245,6 +247,8 @@ internal fun PageEditWebScreen(
                         isDarkTheme = isDarkTheme,
                         textZoom = textZoom,
                         allowedHost = viewModel.allowedHost,
+                        allowedBasePath = viewModel.serverBasePath,
+                        onSessionExpired = viewModel::onSessionExpired,
                         onLoaded = viewModel::onEditorReady,
                         onCloseFromJs = viewModel::onClose,
                         onReloadFromJs = viewModel::onReloadRequested,
@@ -312,6 +316,8 @@ private fun EditorWebView(
     isDarkTheme: Boolean,
     textZoom: Int,
     allowedHost: String?,
+    allowedBasePath: String,
+    onSessionExpired: () -> Unit,
     onLoaded: () -> Unit,
     onCloseFromJs: () -> Unit,
     onReloadFromJs: () -> Unit,
@@ -463,7 +469,9 @@ private fun EditorWebView(
                         onSslError = onSslError,
                         injectionScript = buildInjectionScript(isDarkTheme),
                         allowedHost = allowedHost,
+                        allowedBasePath = allowedBasePath,
                         onExternalLink = openExternally,
+                        onSessionExpired = onSessionExpired,
                     )
                     webChromeClient = ImagePickingChromeClient(
                         launchPicker = { callback ->
@@ -544,7 +552,9 @@ private class StripChromeWebViewClient(
     private val onSslError: () -> Unit,
     private val injectionScript: String,
     private val allowedHost: String?,
+    private val allowedBasePath: String,
     private val onExternalLink: (Uri) -> Unit,
+    private val onSessionExpired: () -> Unit,
 ) : WebViewClient() {
     /**
      * Keep only same-host `https` navigations inside the editor WebView;
@@ -576,6 +586,8 @@ private class StripChromeWebViewClient(
             allowedHost = allowedHost,
             isForMainFrame = request.isForMainFrame,
             hasGesture = request.hasGesture(),
+            targetPath = target.path,
+            allowedBasePath = allowedBasePath,
         )
         return when (decision) {
             NavigationDecision.KeepInWebView -> {
@@ -586,6 +598,12 @@ private class StripChromeWebViewClient(
             NavigationDecision.RouteToSystem -> {
                 onExternalLink(target)
                 true // consumed — don't navigate the editor away
+            }
+
+            NavigationDecision.SessionExpired -> {
+                Timber.tag(TAG).i("Editor session reached the login page; asking for a new session")
+                onSessionExpired()
+                true
             }
 
             NavigationDecision.Block -> {
@@ -609,6 +627,26 @@ private class StripChromeWebViewClient(
         Timber.tag(TAG).w("SSL error from WebView: %s", error)
         handler?.cancel()
         onSslError()
+    }
+
+    /**
+     * S11: the backstop for [shouldOverrideUrlLoading], which isn't
+     * consulted for `loadUrl` itself or for a form POST. A main-frame load
+     * of the server's login page is stopped before it renders.
+     */
+    override fun onPageStarted(
+        view: WebView?,
+        url: String?,
+        favicon: Bitmap?,
+    ) {
+        super.onPageStarted(view, url, favicon)
+        val target = url?.toUri() ?: return
+        val onTheServer = shouldKeepInWebView(target.host, target.scheme, allowedHost)
+        if (onTheServer && isNextcloudLoginPath(target.path, allowedBasePath)) {
+            view?.stopLoading()
+            Timber.tag(TAG).i("Editor started loading the login page; asking for a new session")
+            onSessionExpired()
+        }
     }
 
     override fun onPageFinished(
@@ -806,6 +844,31 @@ internal enum class NavigationDecision {
 
     /** Cancel silently: neither the WebView nor the system sees it. */
     Block,
+
+    /**
+     * S11: the server's own login page. Cancel it and start a fresh
+     * session rather than show a password form inside the editor.
+     */
+    SessionExpired,
+}
+
+/**
+ * S11: whether [path] is Nextcloud's login page — the form itself, its
+ * two-factor challenge, or a Login Flow page — on a server installed under
+ * [basePath] (empty at the root). With or without `index.php`.
+ */
+internal fun isNextcloudLoginPath(
+    path: String?,
+    basePath: String,
+): Boolean {
+    var rest = path ?: return false
+    val base = basePath.trimEnd('/')
+    if (base.isNotEmpty()) {
+        if (!rest.startsWith("$base/")) return false
+        rest = rest.removePrefix(base)
+    }
+    rest = rest.removePrefix("/index.php")
+    return rest == "/login" || rest.startsWith("/login/")
 }
 
 /**
@@ -814,6 +877,7 @@ internal enum class NavigationDecision {
  * unit-testable without a WebView. Layers S-23's gesture requirement over
  * [shouldKeepInWebView]'s host gate:
  *
+ *  - the server's login page, in any frame, ends the session (S11);
  *  - in-session navigations ([shouldKeepInWebView]) stay in the WebView
  *    whatever fired them — Text redirects and loads subframes of its own,
  *    and none of that involves a touch;
@@ -830,10 +894,17 @@ internal fun decideNavigation(
     allowedHost: String?,
     isForMainFrame: Boolean,
     hasGesture: Boolean,
+    targetPath: String? = null,
+    allowedBasePath: String = "",
 ): NavigationDecision =
     when {
+        shouldKeepInWebView(targetHost, targetScheme, allowedHost) &&
+            isNextcloudLoginPath(targetPath, allowedBasePath) -> NavigationDecision.SessionExpired
+
         shouldKeepInWebView(targetHost, targetScheme, allowedHost) -> NavigationDecision.KeepInWebView
+
         isForMainFrame && hasGesture -> NavigationDecision.RouteToSystem
+
         else -> NavigationDecision.Block
     }
 
