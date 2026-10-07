@@ -10,6 +10,7 @@ import com.megamaced.nccollectives.data.auth.AppPasswordRevoker
 import com.megamaced.nccollectives.data.auth.AuthState
 import com.megamaced.nccollectives.data.auth.LocalDataWiper
 import com.megamaced.nccollectives.data.auth.SessionManager
+import com.megamaced.nccollectives.data.auth.WebViewHttpCache
 import com.megamaced.nccollectives.data.auth.accountIdOf
 import com.megamaced.nccollectives.data.db.entity.AttachmentEntity
 import com.megamaced.nccollectives.data.db.entity.EditQueueEntity
@@ -82,6 +83,7 @@ class SessionExpiryIntegrationTest {
             userPreferences = UserPreferences(env.context),
             okHttpClient = client,
             accountGeneration = env.accountGeneration,
+            webViewHttpCache = WebViewHttpCache(env.context),
         )
         switcher = AccountSwitcher(
             sessionManager = sessionManager,
