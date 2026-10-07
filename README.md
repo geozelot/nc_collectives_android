@@ -81,15 +81,26 @@ The app makes no launch-time or background request to GitHub, and it posts no no
 
 ## Authentication
 
-Login uses the standard Nextcloud [Login Flow v2](https://docs.nextcloud.com/server/latest/developer_manual/client_apis/LoginFlow/index.html#login-flow-v2). You provide your server URL and authorise the app from your browser. The app stores only the device-scoped app password returned by your server — your account password is never seen, transmitted, or stored. You can revoke the device at any time from your Nextcloud security settings.
+Login uses the standard Nextcloud [Login Flow v2](https://docs.nextcloud.com/server/latest/developer_manual/client_apis/LoginFlow/index.html#login-flow-v2). You provide your server URL and authorise the app from your browser. The app stores only the device-scoped app password returned by your server — your account password is never seen, transmitted, or stored. The collaborative editor never shows Nextcloud's login form either: if its session has expired, the app asks the server for a new one rather than letting you sign in inside the editor. Signing out revokes the app password; you can also revoke the device at any time from your Nextcloud security settings.
 
 ## Privacy & security
 
-- The app talks **only** to the Nextcloud server you configure. The single third-party request — `api.github.com`, for the update check — is made when you tap **Check for updates** in Settings and at no other time; there is no launch-time or background call to GitHub. That call uses a separate OkHttp client so it never carries your Nextcloud credentials. There are no analytics endpoints, no telemetry, no crash reporters, no third-party SDKs that phone home. The release APK has been confirmed clean of any `com.google.android.gms` or `com.google.firebase` classes.
+- **Who the app talks to.** Only the Nextcloud server you configure, with two exceptions, both on request:
+  - **Update check:** contacts `api.github.com` only when you tap **Check for updates** in Settings. It never runs at launch or in the background, and uses a separate HTTP client that never carries your Nextcloud credentials.
+  - **Links:** a link you open goes to your browser.
+- **Requests to your server** don't follow redirects. The collaborative editor loads nothing from any other host, and the WebView's Safe Browsing lookups and usage metrics are both turned off.
+- **No tracking.** There are no analytics endpoints, no telemetry, no crash reporters and no third-party SDKs that phone home. The release APK has been confirmed clean of any `com.google.android.gms` or `com.google.firebase` classes.
 - No Google Play Services dependencies; no Firebase; no advertising IDs.
 - Plaintext (`http://`) Nextcloud server URLs are refused at login; the app ships with `cleartextTrafficPermitted="false"` in the network-security config.
-- The device-scoped app password is stored in `EncryptedSharedPreferences` (Tink-backed). Sign-out wipes the keystore entry along with every Room table and DataStore value.
-- Network requests trust the system certificate store. There is no certificate pinning yet — if your Nextcloud server uses a self-signed CA you'll need to install that CA on your device.
+- **App password storage:** the device-scoped app password is stored in `EncryptedSharedPreferences` (Tink, keyed from the Android Keystore).
+- **Signing out:**
+  - revokes every stored account's app password on its server, when the server is reachable;
+  - deletes the credential file together with its encryption keys;
+  - clears every Room table, the editor WebView's cache, and the app's settings. Appearance (theme, text size, Material You) is kept.
+- **Removing an account** revokes that account's app password. If a server can't be reached, revoke the device yourself from your Nextcloud security settings.
+- **Cached data:** the offline copy of your pages (a Room database) isn't encrypted by the app. It is protected by Android's app sandbox and the device's file-based encryption.
+- **Backups:** Android backup and device-to-device transfer are disabled, so cached pages and credentials never leave the device that way.
+- **Certificates:** network requests trust the system certificate store only. Certificates you install yourself (the "user" store) aren't trusted, and there is no certificate pinning. A server behind a private or self-signed CA therefore won't connect unless that CA is in the system store, which needs root. A publicly trusted certificate (for example Let's Encrypt) is the supported setup.
 
 ## Tech stack
 
