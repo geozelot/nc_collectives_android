@@ -12,6 +12,7 @@ import androidx.compose.runtime.mutableStateOf
 import androidx.compose.runtime.remember
 import androidx.compose.runtime.setValue
 import androidx.compose.ui.text.input.ImeAction
+import com.megamaced.nccollectives.ui.components.RefuseObscuredTouches
 
 @Composable
 fun RenameDialog(
@@ -36,6 +37,7 @@ fun RenameDialog(
             )
         },
         confirmButton = {
+            RefuseObscuredTouches()
             TextButton(
                 enabled = value.isNotBlank() && value.trim() != currentTitle,
                 onClick = { onRename(value.trim()) },

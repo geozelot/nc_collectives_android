@@ -66,6 +66,7 @@ import com.megamaced.nccollectives.ui.components.ErrorState
 import com.megamaced.nccollectives.ui.components.LoadingState
 import com.megamaced.nccollectives.ui.components.MarkdownOutline
 import com.megamaced.nccollectives.ui.components.MarkdownView
+import com.megamaced.nccollectives.ui.components.RefuseObscuredTouches
 import com.megamaced.nccollectives.ui.components.SnackbarStatusEffect
 import com.megamaced.nccollectives.ui.components.rememberMarkdownOutline
 import com.megamaced.nccollectives.util.AttachmentRef
@@ -485,6 +486,7 @@ internal fun PageViewScreen(
                 )
             },
             confirmButton = {
+                RefuseObscuredTouches()
                 androidx.compose.material3.TextButton(onClick = {
                     showTrashConfirm = false
                     // Commits straight away; the "Moved to trash" snackbar

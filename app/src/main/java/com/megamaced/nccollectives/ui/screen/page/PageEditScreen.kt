@@ -74,6 +74,7 @@ import com.megamaced.nccollectives.ui.attachment.uriDisplayName
 import com.megamaced.nccollectives.ui.components.ErrorState
 import com.megamaced.nccollectives.ui.components.LoadingState
 import com.megamaced.nccollectives.ui.components.MarkdownView
+import com.megamaced.nccollectives.ui.components.RefuseObscuredTouches
 import com.megamaced.nccollectives.ui.components.SnackbarStatusEffect
 import com.megamaced.nccollectives.ui.theme.LocalTextScale
 import kotlinx.coroutines.launch
@@ -224,6 +225,7 @@ internal fun PageEditScreen(
             title = { Text("Discard changes?") },
             text = { Text("You have unsaved edits to this page.") },
             confirmButton = {
+                RefuseObscuredTouches()
                 TextButton(onClick = {
                     showDiscardPrompt = false
                     onClose()

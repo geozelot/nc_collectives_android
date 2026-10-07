@@ -67,6 +67,7 @@ import com.megamaced.nccollectives.data.prefs.TextScale
 import com.megamaced.nccollectives.data.prefs.ThemeMode
 import com.megamaced.nccollectives.domain.model.Collective
 import com.megamaced.nccollectives.ui.attachment.openInBrowser
+import com.megamaced.nccollectives.ui.components.RefuseObscuredTouches
 import com.megamaced.nccollectives.util.syncStatusLines
 import com.megamaced.nccollectives.util.unsentEditsLine
 import kotlinx.coroutines.launch
@@ -337,6 +338,7 @@ internal fun SettingsScreen(
             title = { Text("Switch to ${account.loginName}?") },
             text = { Text(switchWarning(account, pendingEdits)) },
             confirmButton = {
+                RefuseObscuredTouches()
                 TextButton(onClick = {
                     pendingSwitch = null
                     viewModel.switchToAccount(account.id)
@@ -355,6 +357,7 @@ internal fun SettingsScreen(
             title = { Text("Remove ${account.loginName}?") },
             text = { Text(removalWarning(account, isActive, pendingEdits, ui.accounts.size)) },
             confirmButton = {
+                RefuseObscuredTouches()
                 TextButton(onClick = {
                     pendingRemoval = null
                     viewModel.removeAccount(account.id)
@@ -377,6 +380,7 @@ internal fun SettingsScreen(
                 )
             },
             confirmButton = {
+                RefuseObscuredTouches()
                 TextButton(onClick = {
                     showSignOutConfirm = false
                     viewModel.signOut()

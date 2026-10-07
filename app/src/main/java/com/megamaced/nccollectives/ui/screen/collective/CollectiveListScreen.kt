@@ -53,6 +53,7 @@ import androidx.lifecycle.compose.collectAsStateWithLifecycle
 import com.megamaced.nccollectives.domain.model.Collective
 import com.megamaced.nccollectives.ui.components.EmptyState
 import com.megamaced.nccollectives.ui.components.ListStateSwitch
+import com.megamaced.nccollectives.ui.components.RefuseObscuredTouches
 import com.megamaced.nccollectives.ui.components.SnackbarMessageEffect
 import com.megamaced.nccollectives.ui.screen.page.EmojiPickerSheet
 
@@ -194,6 +195,7 @@ internal fun CollectiveListScreen(
                 )
             },
             confirmButton = {
+                RefuseObscuredTouches()
                 TextButton(onClick = {
                     viewModel.trash(target.id)
                     pendingTrash = null

@@ -76,6 +76,7 @@ fun ConflictBanner(
                 )
             },
             confirmButton = {
+                RefuseObscuredTouches()
                 TextButton(onClick = {
                     confirmDiscard = false
                     onDiscard()

@@ -64,6 +64,7 @@ import androidx.lifecycle.compose.collectAsStateWithLifecycle
 import com.megamaced.nccollectives.domain.model.PageListItem
 import com.megamaced.nccollectives.ui.components.EmptyState
 import com.megamaced.nccollectives.ui.components.ListStateSwitch
+import com.megamaced.nccollectives.ui.components.RefuseObscuredTouches
 import com.megamaced.nccollectives.ui.components.SnackbarStatusEffect
 import com.megamaced.nccollectives.ui.components.rememberNowMillis
 import com.megamaced.nccollectives.util.pageEditedLine
@@ -498,6 +499,7 @@ private fun NewPageDialog(
             }
         },
         confirmButton = {
+            RefuseObscuredTouches()
             TextButton(
                 enabled = canCreate,
                 onClick = { onCreate(pickedParentId!!, title.trim()) },
