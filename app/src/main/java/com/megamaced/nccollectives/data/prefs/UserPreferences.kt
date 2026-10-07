@@ -1,7 +1,9 @@
 package com.megamaced.nccollectives.data.prefs
 
 import android.content.Context
+import androidx.datastore.core.DataStore
 import androidx.datastore.preferences.core.Preferences
+import androidx.datastore.preferences.core.booleanPreferencesKey
 import androidx.datastore.preferences.core.edit
 import androidx.datastore.preferences.core.longPreferencesKey
 import androidx.datastore.preferences.core.stringPreferencesKey
@@ -103,6 +105,12 @@ data class UserPrefs(
      * if the collective is gone.
      */
     val defaultCollectiveId: Long? = null,
+    /**
+     * S9: keep page text out of the Recents thumbnail. Off by default; on
+     * Android 12 and earlier it also blocks screenshots, the only way the
+     * platform offers there.
+     */
+    val hideInRecents: Boolean = false,
 )
 
 /**
@@ -126,28 +134,36 @@ private val Context.dataStore by preferencesDataStore(name = "user_prefs")
 
 @Singleton
 class UserPreferences
-    @Inject
-    constructor(
-        @ApplicationContext private val context: Context,
+    internal constructor(
+        private val dataStore: DataStore<Preferences>,
     ) {
-        val flow: Flow<UserPrefs> = context.dataStore.data.map { it.toModel() }
+        @Inject
+        constructor(
+            @ApplicationContext context: Context,
+        ) : this(context.dataStore)
 
-        val syncStatus: Flow<SyncStatus> = context.dataStore.data.map { it.toSyncStatus() }
+        val flow: Flow<UserPrefs> = dataStore.data.map { it.toModel() }
+
+        val syncStatus: Flow<SyncStatus> = dataStore.data.map { it.toSyncStatus() }
 
         suspend fun setThemeMode(mode: ThemeMode) {
-            context.dataStore.edit { it[KEY_THEME_MODE] = mode.name }
+            dataStore.edit { it[KEY_THEME_MODE] = mode.name }
         }
 
         suspend fun setTextScale(scale: TextScale) {
-            context.dataStore.edit { it[KEY_TEXT_SCALE] = scale.name }
+            dataStore.edit { it[KEY_TEXT_SCALE] = scale.name }
         }
 
         suspend fun setSyncCadence(cadence: SyncCadence) {
-            context.dataStore.edit { it[KEY_SYNC_CADENCE] = cadence.name }
+            dataStore.edit { it[KEY_SYNC_CADENCE] = cadence.name }
+        }
+
+        suspend fun setHideInRecents(hide: Boolean) {
+            dataStore.edit { it[KEY_HIDE_IN_RECENTS] = hide }
         }
 
         suspend fun setEditorPreference(preference: EditorPreference) {
-            context.dataStore.edit { it[KEY_EDITOR_PREFERENCE] = preference.name }
+            dataStore.edit { it[KEY_EDITOR_PREFERENCE] = preference.name }
         }
 
         /**
@@ -156,7 +172,7 @@ class UserPreferences
          * collective can never be confused with "off".
          */
         suspend fun setDefaultCollectiveId(collectiveId: Long?) {
-            context.dataStore.edit { prefs ->
+            dataStore.edit { prefs ->
                 if (collectiveId == null) {
                     prefs.remove(KEY_DEFAULT_COLLECTIVE_ID)
                 } else {
@@ -168,7 +184,7 @@ class UserPreferences
         suspend fun pushRecentSearch(term: String) {
             val cleaned = term.trim()
             if (cleaned.isEmpty()) return
-            context.dataStore.edit { prefs ->
+            dataStore.edit { prefs ->
                 val current = prefs[KEY_RECENT_SEARCHES].toList()
                 val deduped = (listOf(cleaned) + current.filterNot { it.equals(cleaned, ignoreCase = true) })
                     .take(MAX_RECENT_SEARCHES)
@@ -177,7 +193,7 @@ class UserPreferences
         }
 
         suspend fun clearRecentSearches() {
-            context.dataStore.edit { it.remove(KEY_RECENT_SEARCHES) }
+            dataStore.edit { it.remove(KEY_RECENT_SEARCHES) }
         }
 
         /**
@@ -186,7 +202,7 @@ class UserPreferences
          * already recovered from.
          */
         suspend fun recordSyncSuccess(epochMillis: Long) {
-            context.dataStore.edit { prefs ->
+            dataStore.edit { prefs ->
                 prefs[KEY_SYNC_LAST_SUCCESS_AT] = epochMillis
                 prefs.remove(KEY_SYNC_LAST_FAILURE_AT)
                 prefs.remove(KEY_SYNC_LAST_FAILURE_MESSAGE)
@@ -198,7 +214,7 @@ class UserPreferences
             epochMillis: Long,
             message: String,
         ) {
-            context.dataStore.edit { prefs ->
+            dataStore.edit { prefs ->
                 prefs[KEY_SYNC_LAST_FAILURE_AT] = epochMillis
                 prefs[KEY_SYNC_LAST_FAILURE_MESSAGE] = message
             }
@@ -206,14 +222,21 @@ class UserPreferences
 
         /** Wipe everything — invoked by the sign-out flow before the auth state flips. */
         suspend fun clearAll() {
-            context.dataStore.edit { it.clear() }
+            dataStore.edit { prefs ->
+                // S9: a privacy choice about this device, which signing out
+                // must not quietly undo — the login screen is shown next.
+                val hideInRecents = prefs[KEY_HIDE_IN_RECENTS]
+                prefs.clear()
+                hideInRecents?.let { prefs[KEY_HIDE_IN_RECENTS] = it }
+            }
         }
 
         /**
          * Wipe everything that belongs to the signed-in account, for an
          * account switch (issue #14).
          *
-         * Kept: theme, text scale, sync cadence, editor preference, and the
+         * Kept: theme, text scale, sync cadence, editor preference, hiding
+         * content from Recents, and the
          * update-check bookkeeping. Those describe how the user has set this
          * *device* up — resetting the theme because they looked at their
          * other server would be a bug — and the GitHub update check has
@@ -226,7 +249,7 @@ class UserPreferences
          * costs the user a device setting, once.
          */
         suspend fun clearAccountScoped() {
-            context.dataStore.edit { prefs ->
+            dataStore.edit { prefs ->
                 // Read out, clear, put back. Spelled out per key rather than
                 // looped over an untyped map because `MutablePreferences` has
                 // no untyped setter, and the alternative is an unchecked cast
@@ -236,6 +259,7 @@ class UserPreferences
                 val textScale = prefs[KEY_TEXT_SCALE]
                 val syncCadence = prefs[KEY_SYNC_CADENCE]
                 val editorPreference = prefs[KEY_EDITOR_PREFERENCE]
+                val hideInRecents = prefs[KEY_HIDE_IN_RECENTS]
 
                 prefs.clear()
 
@@ -243,6 +267,7 @@ class UserPreferences
                 textScale?.let { prefs[KEY_TEXT_SCALE] = it }
                 syncCadence?.let { prefs[KEY_SYNC_CADENCE] = it }
                 editorPreference?.let { prefs[KEY_EDITOR_PREFERENCE] = it }
+                hideInRecents?.let { prefs[KEY_HIDE_IN_RECENTS] = it }
             }
         }
 
@@ -250,10 +275,10 @@ class UserPreferences
          * Last `status.php` version we saw, or null if we've never asked.
          * See `ServerVersionTracker` for what it gates.
          */
-        suspend fun getLastSeenServerVersion(): String? = context.dataStore.data.first()[KEY_SERVER_VERSION]
+        suspend fun getLastSeenServerVersion(): String? = dataStore.data.first()[KEY_SERVER_VERSION]
 
         suspend fun setLastSeenServerVersion(version: String) {
-            context.dataStore.edit { it[KEY_SERVER_VERSION] = version }
+            dataStore.edit { it[KEY_SERVER_VERSION] = version }
         }
 
         private fun Preferences.toModel(): UserPrefs {
@@ -284,6 +309,7 @@ class UserPreferences
                 recentSearches = this[KEY_RECENT_SEARCHES].toList(),
                 editorPreference = editorPreference,
                 defaultCollectiveId = this[KEY_DEFAULT_COLLECTIVE_ID],
+                hideInRecents = this[KEY_HIDE_IN_RECENTS] ?: false,
             )
         }
 
@@ -302,6 +328,7 @@ class UserPreferences
             val KEY_SYNC_CADENCE = stringPreferencesKey("sync_cadence")
             val KEY_RECENT_SEARCHES = stringPreferencesKey("recent_searches")
             val KEY_EDITOR_PREFERENCE = stringPreferencesKey("editor_preference")
+            val KEY_HIDE_IN_RECENTS = booleanPreferencesKey("hide_in_recents")
             val KEY_DEFAULT_COLLECTIVE_ID = longPreferencesKey("default_collective_id")
             val KEY_SERVER_VERSION = stringPreferencesKey("last_seen_server_version")
             val KEY_SYNC_LAST_SUCCESS_AT = longPreferencesKey("sync_last_success_at")

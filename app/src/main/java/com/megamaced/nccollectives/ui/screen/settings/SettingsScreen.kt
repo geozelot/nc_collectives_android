@@ -1,6 +1,7 @@
 package com.megamaced.nccollectives.ui.screen.settings
 
 import android.net.Uri
+import android.os.Build
 import androidx.browser.customtabs.CustomTabsIntent
 import androidx.compose.foundation.clickable
 import androidx.compose.foundation.layout.Arrangement
@@ -15,6 +16,7 @@ import androidx.compose.foundation.layout.padding
 import androidx.compose.foundation.layout.size
 import androidx.compose.foundation.rememberScrollState
 import androidx.compose.foundation.selection.selectable
+import androidx.compose.foundation.selection.toggleable
 import androidx.compose.foundation.verticalScroll
 import androidx.compose.material.icons.Icons
 import androidx.compose.material.icons.automirrored.filled.ArrowBack
@@ -35,6 +37,7 @@ import androidx.compose.material3.RadioButton
 import androidx.compose.material3.Scaffold
 import androidx.compose.material3.SnackbarHost
 import androidx.compose.material3.SnackbarHostState
+import androidx.compose.material3.Switch
 import androidx.compose.material3.Text
 import androidx.compose.material3.TextButton
 import androidx.compose.material3.TopAppBar
@@ -222,6 +225,14 @@ internal fun SettingsScreen(
             TextScaleOptions(
                 selected = ui.textScale,
                 onSelect = viewModel::setTextScale,
+            )
+
+            HorizontalDivider()
+
+            SectionHeader("Privacy")
+            HideInRecentsRow(
+                checked = ui.hideInRecents,
+                onCheckedChange = viewModel::setHideInRecents,
             )
 
             HorizontalDivider()
@@ -609,6 +620,42 @@ private fun DefaultCollectiveOptions(
                 modifier = Modifier.padding(top = 4.dp),
             )
         }
+    }
+}
+
+/**
+ * S9: the Recents thumbnail is a picture of whatever page was open, kept
+ * where anyone holding the phone can see it. Android 13 can leave just the
+ * thumbnail out; before that the only switch the platform has also blocks
+ * screenshots and screen recording, and the description says so.
+ */
+@Composable
+private fun HideInRecentsRow(
+    checked: Boolean,
+    onCheckedChange: (Boolean) -> Unit,
+) {
+    Row(
+        modifier = Modifier
+            .fillMaxWidth()
+            .toggleable(value = checked, onValueChange = onCheckedChange, role = Role.Switch)
+            .padding(vertical = 8.dp),
+        verticalAlignment = Alignment.CenterVertically,
+        horizontalArrangement = Arrangement.spacedBy(12.dp),
+    ) {
+        Column(modifier = Modifier.weight(1f)) {
+            Text("Hide content in recent apps", style = MaterialTheme.typography.bodyLarge)
+            Text(
+                if (Build.VERSION.SDK_INT >= Build.VERSION_CODES.TIRAMISU) {
+                    "The app switcher shows a blank card instead of the open page."
+                } else {
+                    "The app switcher shows a blank card instead of the open page. " +
+                        "On this Android version that also blocks screenshots and screen recording."
+                },
+                style = MaterialTheme.typography.bodySmall,
+                color = MaterialTheme.colorScheme.onSurfaceVariant,
+            )
+        }
+        Switch(checked = checked, onCheckedChange = null)
     }
 }
 
