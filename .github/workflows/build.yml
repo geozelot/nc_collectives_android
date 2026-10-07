@@ -24,7 +24,9 @@ jobs:
     runs-on: ubuntu-latest
     timeout-minutes: 30
     steps:
-      - uses: actions/checkout@v7
+      - uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7.0.1
+        with:
+          persist-credentials: false
 
       # Release metadata is hand-maintained across four files. On a tag build
       # they must all agree, or F-Droid builds the wrong commit / 404s on the
@@ -152,59 +154,21 @@ jobs:
           sys.exit(1 if failures else 0)
           PY
 
-      - uses: actions/setup-java@v6
+      - uses: actions/setup-java@de7274f081f381c8f8158605e0321c36c376e2e6 # v6.0.1
         with:
           distribution: temurin
           java-version: '21'
 
-      - uses: gradle/actions/setup-gradle@v6
+      - uses: gradle/actions/setup-gradle@3f5f9adaf7d9fecd50b5935e54106014257a94e6 # v6.4.0
         with:
           cache-read-only: ${{ github.event_name == 'pull_request' }}
 
-      # On a tag the signing material is mandatory: an unsigned APK cannot be
-      # installed as an upgrade and F-Droid's AllowedAPKSigningKeys rejects it.
-      # Off a tag (and on fork PRs, where secrets are unavailable) an unsigned
-      # release build is fine and wanted — it is the same path F-Droid's own
-      # builder takes.
-      - name: Decode release keystore
-        env:
-          KEYSTORE_BASE64: ${{ secrets.ANDROID_RELEASE_KEYSTORE_BASE64 }}
-          STORE_PASSWORD: ${{ secrets.ANDROID_RELEASE_STORE_PASSWORD }}
-          KEY_ALIAS: ${{ secrets.ANDROID_RELEASE_KEY_ALIAS }}
-          KEY_PASSWORD: ${{ secrets.ANDROID_RELEASE_KEY_PASSWORD }}
-        run: |
-          is_tag=false
-          if [[ "$GITHUB_REF" == refs/tags/v* ]]; then
-            is_tag=true
-          fi
-
-          if [ -z "$KEYSTORE_BASE64" ]; then
-            if [ "$is_tag" = true ]; then
-              echo "::error::ANDROID_RELEASE_KEYSTORE_BASE64 is not set, so this tag build would produce an unsigned APK. Set the four ANDROID_RELEASE_* repository secrets (see docs/SIGNING.md) and re-run."
-              exit 1
-            fi
-            echo "ANDROID_RELEASE_KEYSTORE_BASE64 not set — assembleRelease will produce an unsigned APK (expected off tag builds)."
-            exit 0
-          fi
-
-          if [ "$is_tag" = true ]; then
-            missing=""
-            [ -n "$STORE_PASSWORD" ] || missing="$missing ANDROID_RELEASE_STORE_PASSWORD"
-            [ -n "$KEY_ALIAS" ] || missing="$missing ANDROID_RELEASE_KEY_ALIAS"
-            [ -n "$KEY_PASSWORD" ] || missing="$missing ANDROID_RELEASE_KEY_PASSWORD"
-            if [ -n "$missing" ]; then
-              echo "::error::keystore present but these secrets are unset:$missing — the release APK would be unsigned."
-              exit 1
-            fi
-          fi
-
-          echo "$KEYSTORE_BASE64" | base64 -d > "$RUNNER_TEMP/release.keystore"
-          {
-            echo "ANDROID_RELEASE_KEYSTORE_FILE=$RUNNER_TEMP/release.keystore"
-            echo "ANDROID_RELEASE_STORE_PASSWORD=$STORE_PASSWORD"
-            echo "ANDROID_RELEASE_KEY_ALIAS=$KEY_ALIAS"
-            echo "ANDROID_RELEASE_KEY_PASSWORD=$KEY_PASSWORD"
-          } >> "$GITHUB_ENV"
+      # H5: no signing material in this job, on any ref. It used to be
+      # decoded here into $GITHUB_ENV on every push to main and every
+      # same-repo PR, where every later step -- each Gradle plugin, annotation
+      # processor and test dependency, and the actions' post-steps -- could
+      # read it. assembleRelease below produces the unsigned APK, which is
+      # what F-Droid's builder makes too, and the `sign` job signs on tags.
 
       # assembleRelease/lintRelease run on every ref, not just tags, so R8 keep
       # rules and resource shrinking are exercised on the PR that breaks them
@@ -217,40 +181,13 @@ jobs:
           testDebugUnitTest
           assembleDebug assembleRelease
 
-      # Guards against the failure mode where signing silently degrades and an
-      # uninstallable app-release-unsigned.apk gets published.
-      - name: Verify the release APK is signed
-        if: startsWith(github.ref, 'refs/tags/v')
-        run: |
-          out=app/build/outputs/apk/release
-          if [ ! -f "$out/app-release.apk" ]; then
-            echo "::error::$out/app-release.apk was not produced — the release build was not signed."
-            ls -l "$out" || true
-            exit 1
-          fi
-          if [ -f "$out/app-release-unsigned.apk" ]; then
-            echo "::error::$out/app-release-unsigned.apk exists — the signing config was skipped."
-            exit 1
-          fi
-
       - name: Upload debug APK
-        uses: actions/upload-artifact@v7
+        uses: actions/upload-artifact@043fb46d1a93c77aae656e7c1c64a875d1fc6a0a # v7.0.1
         with:
           name: nc_collectives_android-debug-${{ github.sha }}
           path: app/build/outputs/apk/debug/*.apk
           if-no-files-found: error
           retention-days: 14
-
-      # Exact filename, never a glob: app-release-unsigned.apk must not be able
-      # to ride along into the artifact the release job publishes.
-      - name: Upload release APK
-        if: startsWith(github.ref, 'refs/tags/v')
-        uses: actions/upload-artifact@v7
-        with:
-          name: nc_collectives_android-release-${{ github.sha }}
-          path: app/build/outputs/apk/release/app-release.apk
-          if-no-files-found: error
-          retention-days: 30
 
   # The five tests in app/src/androidTest are the only coverage for the seven
   # hand-written Room migrations in data/db/Migrations.kt. They are
@@ -294,9 +231,11 @@ jobs:
       EMULATOR_TARGET: default
       EMULATOR_ARCH: x86_64
     steps:
-      - uses: actions/checkout@v7
+      - uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7.0.1
+        with:
+          persist-credentials: false
 
-      - uses: actions/setup-java@v6
+      - uses: actions/setup-java@de7274f081f381c8f8158605e0321c36c376e2e6 # v6.0.1
         with:
           distribution: temurin
           java-version: '21'
@@ -304,7 +243,7 @@ jobs:
       # Read-only on every ref, not just PRs (which is what `build` does):
       # `build` runs in the same run and is the cache writer, and two jobs
       # racing to save the same Gradle cache entry is how it ends up thrashed.
-      - uses: gradle/actions/setup-gradle@v6
+      - uses: gradle/actions/setup-gradle@3f5f9adaf7d9fecd50b5935e54106014257a94e6 # v6.4.0
         with:
           cache-read-only: true
 
@@ -371,7 +310,7 @@ jobs:
       # so the diagnosis does not require reproducing the emulator locally.
       - name: Upload androidTest report
         if: failure()
-        uses: actions/upload-artifact@v7
+        uses: actions/upload-artifact@043fb46d1a93c77aae656e7c1c64a875d1fc6a0a # v7.0.1
         with:
           name: nc_collectives_android-androidTest-report-${{ github.sha }}
           path: |
@@ -382,7 +321,91 @@ jobs:
           if-no-files-found: warn
           retention-days: 14
 
-  # `needs: build` only — deliberately NOT `needs: [build, instrumented-tests]`.
+  # H5: the only job that ever holds the release key, and only on a tag.
+  #
+  # It runs in the `release` environment, so the maintainer can restrict it
+  # to `v*` tags and require an approval, and keep the four
+  # ANDROID_RELEASE_* secrets in the environment rather than the repository.
+  # Repository secrets keep working until then.
+  #
+  # No Gradle cache, so a tag build reads nothing that a main or PR run
+  # wrote. The secrets reach one step's environment, never $GITHUB_ENV, and
+  # the decoded keystore is deleted when that step ends. AGP still does the
+  # signing, so the APK is byte for byte what F-Droid's reproducible build
+  # compares against. The check after it pins the certificate rather than
+  # trusting a filename.
+  sign:
+    needs: build
+    if: startsWith(github.ref, 'refs/tags/v')
+    runs-on: ubuntu-latest
+    timeout-minutes: 30
+    environment: release
+    steps:
+      - uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7.0.1
+        with:
+          persist-credentials: false
+
+      - uses: actions/setup-java@de7274f081f381c8f8158605e0321c36c376e2e6 # v6.0.1
+        with:
+          distribution: temurin
+          java-version: '21'
+
+      - uses: gradle/actions/setup-gradle@3f5f9adaf7d9fecd50b5935e54106014257a94e6 # v6.4.0
+        with:
+          cache-disabled: true
+
+      - name: Build and sign the release APK
+        env:
+          KEYSTORE_BASE64: ${{ secrets.ANDROID_RELEASE_KEYSTORE_BASE64 }}
+          ANDROID_RELEASE_STORE_PASSWORD: ${{ secrets.ANDROID_RELEASE_STORE_PASSWORD }}
+          ANDROID_RELEASE_KEY_ALIAS: ${{ secrets.ANDROID_RELEASE_KEY_ALIAS }}
+          ANDROID_RELEASE_KEY_PASSWORD: ${{ secrets.ANDROID_RELEASE_KEY_PASSWORD }}
+        run: |
+          missing=""
+          [ -n "$KEYSTORE_BASE64" ] || missing="$missing ANDROID_RELEASE_KEYSTORE_BASE64"
+          [ -n "$ANDROID_RELEASE_STORE_PASSWORD" ] || missing="$missing ANDROID_RELEASE_STORE_PASSWORD"
+          [ -n "$ANDROID_RELEASE_KEY_ALIAS" ] || missing="$missing ANDROID_RELEASE_KEY_ALIAS"
+          [ -n "$ANDROID_RELEASE_KEY_PASSWORD" ] || missing="$missing ANDROID_RELEASE_KEY_PASSWORD"
+          if [ -n "$missing" ]; then
+            echo "::error::these secrets are unset:$missing, so this tag would publish an unsigned APK. See docs/SIGNING.md."
+            exit 1
+          fi
+          keystore="$RUNNER_TEMP/release.keystore"
+          trap 'rm -f "$keystore"' EXIT
+          echo "$KEYSTORE_BASE64" | base64 -d > "$keystore"
+          unset KEYSTORE_BASE64
+          ANDROID_RELEASE_KEYSTORE_FILE="$keystore" ./gradlew --no-daemon assembleRelease
+
+      # Signed, and by the key F-Droid pins (AllowedAPKSigningKeys). The old
+      # check only looked at the output's filename.
+      - name: Verify the APK carries the published signing certificate
+        run: |
+          out=app/build/outputs/apk/release
+          if [ ! -f "$out/app-release.apk" ] || [ -f "$out/app-release-unsigned.apk" ]; then
+            echo "::error::the release build was not signed."
+            ls -l "$out" || true
+            exit 1
+          fi
+          apksigner="$(ls -d "$ANDROID_HOME"/build-tools/*/ | sort -V | tail -1)apksigner"
+          expected="$(sed -n 's/^AllowedAPKSigningKeys: *//p' docs/fdroid/com.megamaced.nccollectives.yml | tr -d '[:space:]')"
+          actual="$("$apksigner" verify --print-certs "$out/app-release.apk" | sed -n 's/.*certificate SHA-256 digest: *//p' | sort -u)"
+          if [ -z "$expected" ] || [ "$actual" != "$expected" ]; then
+            echo "::error::signing certificate is '$actual', the published one is '$expected'."
+            exit 1
+          fi
+          echo "Signed with the published certificate $actual"
+
+      # Exact filename, never a glob: app-release-unsigned.apk must not be able
+      # to ride along into the artifact the release job publishes.
+      - name: Upload release APK
+        uses: actions/upload-artifact@043fb46d1a93c77aae656e7c1c64a875d1fc6a0a # v7.0.1
+        with:
+          name: nc_collectives_android-release-${{ github.sha }}
+          path: app/build/outputs/apk/release/app-release.apk
+          if-no-files-found: error
+          retention-days: 30
+
+  # `needs: sign` (which needs `build`) — deliberately NOT instrumented-tests.
   # The emulator is the least reliable component in this workflow (boot
   # timeouts, KVM availability, adb dropping the device), and the migration
   # gate has already done its work by tag time: the tagged commit passed
@@ -393,7 +416,7 @@ jobs:
   # runs on the tag, so a genuine migration failure is visible on the release
   # run; it just does not hold the artifact hostage.
   release:
-    needs: build
+    needs: sign
     if: startsWith(github.ref, 'refs/tags/v')
     runs-on: ubuntu-latest
     timeout-minutes: 10
@@ -402,7 +425,7 @@ jobs:
       actions: read    # download this run's release-APK artifact
     steps:
       - name: Download the signed release APK
-        uses: actions/download-artifact@v8
+        uses: actions/download-artifact@3e5f45b2cfb9172054b4087a40e8e0b5a5461e7c # v8.0.1
         with:
           name: nc_collectives_android-release-${{ github.sha }}
           path: dist

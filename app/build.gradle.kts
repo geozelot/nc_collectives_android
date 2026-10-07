@@ -26,8 +26,9 @@ kotlin {
 }
 
 // Release-signing config is sourced from environment variables so the keystore
-// never lands on disk in the repo. CI decodes ANDROID_RELEASE_KEYSTORE_BASE64
-// into a file and exports ANDROID_RELEASE_KEYSTORE_FILE for this script; local
+// never lands on disk in the repo. CI's tag-only `sign` job decodes
+// ANDROID_RELEASE_KEYSTORE_BASE64 into a file and passes
+// ANDROID_RELEASE_KEYSTORE_FILE to this script's one invocation there; local
 // signed builds export the same four vars from a shell-rc file. If any are
 // absent the release build still works but produces an unsigned APK.
 val releaseKeystoreFile: String? = System.getenv("ANDROID_RELEASE_KEYSTORE_FILE")
