@@ -151,6 +151,19 @@ class ShareCaptureViewModel
 
         private var pagesJob: Job? = null
 
+        /**
+         * U1: the user backed out of the share, by the close button or Back.
+         *
+         * Dismissing used to pop the screen and nothing else. The payload
+         * stayed in [SharePayloadHolder], and in the activity's saved state
+         * (B-74), so the next rotation or process restore found it there and
+         * navigated straight back into this screen, where Create then made a
+         * page the user had already declined.
+         */
+        fun cancel() {
+            _uiState.value.payload?.let { sharePayloadHolder.consume(it.id) }
+        }
+
         fun selectCollective(id: Long) {
             // B-55: dedupe by id. The auto-pick `LaunchedEffect(collectives)`
             // in the share screen keys on the list reference, so any
