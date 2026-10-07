@@ -227,7 +227,7 @@ dependencies {
 
     // Navigation
     implementation(libs.androidx.navigation.compose)
-    implementation(libs.androidx.hilt.navigation.compose)
+    implementation(libs.androidx.hilt.lifecycle.viewmodel.compose)
 
     // Browser (Custom Tabs for Nextcloud login)
     implementation(libs.androidx.browser)
