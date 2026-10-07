@@ -50,6 +50,7 @@ class LocalDataWiper
         private val userPreferences: UserPreferences,
         private val okHttpClient: OkHttpClient,
         private val accountGeneration: AccountGeneration,
+        private val webViewHttpCache: WebViewHttpCache,
     ) {
         /**
          * @param keepDevicePreferences when true, settings that describe the
@@ -157,6 +158,12 @@ class LocalDataWiper
                 cookies.flush()
                 WebStorage.getInstance().deleteAllData()
                 WebViewDatabase.getInstance(context).clearFormData()
+                // S-29: and the HTTP disk cache. Cookies, storage and form
+                // data were cleared, but whatever Text served under the
+                // outgoing session stayed on disk for the next account. The
+                // editor's own version-change `clearCache` couldn't catch it
+                // either, because the wipe deletes the version it compares.
+                webViewHttpCache.clear()
             }.onFailure { Timber.w(it, "Couldn't clear WebView state") }
         }
 
