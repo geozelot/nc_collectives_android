@@ -1,5 +1,6 @@
 package com.megamaced.nccollectives.data.prefs
 
+import android.content.Context
 import androidx.test.core.app.ApplicationProvider
 import androidx.test.ext.junit.runners.AndroidJUnit4
 import kotlinx.coroutines.flow.first
@@ -17,7 +18,7 @@ import org.junit.runner.RunWith
  */
 @RunWith(AndroidJUnit4::class)
 class AppearanceSurvivesSignOutTest {
-    private val prefs = UserPreferences(ApplicationProvider.getApplicationContext())
+    private val prefs = UserPreferences(ApplicationProvider.getApplicationContext<Context>())
 
     @Test
     fun signOut_keepsTheAppearanceAndDropsTheRest() =
