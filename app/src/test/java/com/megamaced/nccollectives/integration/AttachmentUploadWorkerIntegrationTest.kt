@@ -92,6 +92,7 @@ class AttachmentUploadWorkerIntegrationTest {
                 // cannot be confused for one another — on the extension, because
                 // the page's own path arrives percent-encoded (`/Page%2012.md`).
                 .on("/.attachments.12/photo.jpg", OcsResponses.webDav(412), method = "PUT")
+                .on("/.attachments.12/photo.jpg", theirs("not mine"), method = "GET")
                 .on(".md", OcsResponses.webDav(204, etag = "\"body-2\""), method = "PUT")
                 .on("/.attachments.12", OcsResponses.webDav(207).setBody(EMPTY_MULTISTATUS), method = "PROPFIND")
 
@@ -123,6 +124,7 @@ class AttachmentUploadWorkerIntegrationTest {
             env.seedStagedUpload(pageId = 12, fileName = "photo.jpg")
             dispatcher
                 .on("/.attachments.12/photo.jpg", OcsResponses.webDav(412), method = "PUT")
+                .on("/.attachments.12/photo.jpg", theirs("not mine"), method = "GET")
                 .on("/.attachments.12", OcsResponses.webDav(207).setBody(EMPTY_MULTISTATUS), method = "PROPFIND")
                 .on(".md", OcsResponses.webDav(500), method = "PUT")
 
@@ -134,6 +136,82 @@ class AttachmentUploadWorkerIntegrationTest {
                 env.db.attachmentDao().getById(AttachmentEntity.key(12, "photo-1.jpg")),
             )
             assertTrue(env.stagedFile(12, "photo-1.jpg").exists())
+        }
+
+    @Test
+    fun uploadThatLandedButLostItsResponse_isRecordedRatherThanRenamed() =
+        runTest {
+            // D1b: the previous attempt's PUT reached the server and its
+            // response didn't reach the app — a read timeout, or the worker
+            // cancelled mid-call. Its retry is refused by its own
+            // `If-None-Match: *`, and renaming would put a second copy beside
+            // the first and repoint the body at it.
+            env.seedPage(id = 12, bodyMd = "![photo.jpg](photo.jpg)", bodyEtag = "body-1")
+            env.seedStagedUpload(pageId = 12, fileName = "photo.jpg", bytes = "mine".toByteArray(), attempts = 1)
+            dispatcher
+                .on("/.attachments.12/photo.jpg", OcsResponses.webDav(412), method = "PUT")
+                .on("/.attachments.12/photo.jpg", theirs("mine", etag = "\"landed-1\""), method = "GET")
+
+            val result = worker().doWork()
+
+            assertTrue(result is ListenableWorker.Result.Success)
+            val row = env.db.attachmentDao().getById(AttachmentEntity.key(12, "photo.jpg"))
+            assertEquals(AttachmentEntity.STATUS_REMOTE, row?.status)
+            assertEquals("landed-1", row?.etag)
+            assertNull(env.db.attachmentDao().getById(AttachmentEntity.key(12, "photo-1.jpg")))
+            assertTrue(!env.stagedFile(12, "photo.jpg").exists())
+            assertEquals(
+                "![photo.jpg](photo.jpg)",
+                env.db
+                    .pageDao()
+                    .getById(12)
+                    ?.bodyMd,
+            )
+            assertEquals("no second upload and no body rewrite", 1, dispatcher.requestsWithMethod("PUT").size)
+        }
+
+    @Test
+    fun nameTakenBySameSizedDifferentBytes_isStillRenamed() =
+        runTest {
+            env.seedPage(id = 12, bodyMd = "![photo.jpg](photo.jpg)", bodyEtag = "body-1")
+            env.seedStagedUpload(pageId = 12, fileName = "photo.jpg", bytes = "mine".toByteArray(), attempts = 1)
+            dispatcher
+                .on("/.attachments.12/photo.jpg", OcsResponses.webDav(412), method = "PUT")
+                .on("/.attachments.12/photo.jpg", theirs("mime"), method = "GET")
+                .on("/.attachments.12", OcsResponses.webDav(207).setBody(EMPTY_MULTISTATUS), method = "PROPFIND")
+                .on(".md", OcsResponses.webDav(204, etag = "\"body-2\""), method = "PUT")
+
+            val result = worker().doWork()
+
+            assertTrue(result is ListenableWorker.Result.Retry)
+            assertNotNull(env.db.attachmentDao().getById(AttachmentEntity.key(12, "photo-1.jpg")))
+        }
+
+    @Test
+    fun nameCheckCutShortByTheServer_retriesUnderTheSameName() =
+        runTest {
+            // Renaming on a doubt is the one outcome that can't be undone
+            // cheaply: it moves the body's reference. A comparison that
+            // didn't finish is a failed attempt, retried as one.
+            env.seedPage(id = 12, bodyMd = "![photo.jpg](photo.jpg)", bodyEtag = "body-1")
+            env.seedStagedUpload(pageId = 12, fileName = "photo.jpg", bytes = "mine".toByteArray(), attempts = 1)
+            dispatcher
+                .on("/.attachments.12/photo.jpg", OcsResponses.webDav(412), method = "PUT")
+                .on("/.attachments.12/photo.jpg", OcsResponses.webDav(503), method = "GET")
+
+            val result = worker().doWork()
+
+            assertTrue(result is ListenableWorker.Result.Retry)
+            val row = env.db.attachmentDao().getById(AttachmentEntity.key(12, "photo.jpg"))
+            assertEquals(AttachmentEntity.STATUS_PENDING, row?.status)
+            assertNull(env.db.attachmentDao().getById(AttachmentEntity.key(12, "photo-1.jpg")))
+            assertEquals(
+                "![photo.jpg](photo.jpg)",
+                env.db
+                    .pageDao()
+                    .getById(12)
+                    ?.bodyMd,
+            )
         }
 
     @Test
@@ -257,6 +335,12 @@ class AttachmentUploadWorkerIntegrationTest {
                         )
                 },
             ).build()
+
+    /** A GET of an attachment that is already on the server, holding [bytes]. */
+    private fun theirs(
+        bytes: String,
+        etag: String = "\"theirs-1\"",
+    ) = OcsResponses.webDav(200, etag = etag).setBody(bytes)
 
     private companion object {
         val EMPTY_MULTISTATUS =
