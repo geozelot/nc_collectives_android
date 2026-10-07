@@ -39,6 +39,12 @@ internal sealed class Destination(
     object PageEditWeb : Destination("page/{pageId}/edit-web") {
         const val ARG_PAGE_ID = "pageId"
 
+        /**
+         * U8: set on the page view's entry when this editor hands back, so
+         * the page revalidates its body.
+         */
+        const val RESULT_RETURNED = "page_edit_web_returned"
+
         fun route(pageId: Long) = "page/$pageId/edit-web"
     }
 

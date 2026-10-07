@@ -12,11 +12,13 @@ import com.megamaced.nccollectives.domain.repository.DirectEditingRepository
 import com.megamaced.nccollectives.domain.repository.PageRepository
 import com.megamaced.nccollectives.ui.navigation.Destination
 import dagger.hilt.android.lifecycle.HiltViewModel
+import kotlinx.coroutines.Job
 import kotlinx.coroutines.flow.MutableStateFlow
 import kotlinx.coroutines.flow.StateFlow
 import kotlinx.coroutines.flow.asStateFlow
 import kotlinx.coroutines.flow.update
 import kotlinx.coroutines.launch
+import kotlinx.coroutines.withTimeoutOrNull
 import javax.inject.Inject
 
 /**
@@ -101,8 +103,23 @@ class PageEditWebViewModel
          */
         val allowedHost: String? = tokenStore.getCredentials()?.host?.let(::serverHostOf)
 
+        /** The `directediting/open` request in flight, if any. */
+        private var sessionJob: Job? = null
+
         init {
             requestSession()
+        }
+
+        /**
+         * Publish a session outcome unless the user has already left. U8:
+         * [leave] closes while the request may still be out, and a late
+         * `Loaded` landing over `Closed` before the screen saw it would have
+         * left the user in an editor they had backed out of.
+         */
+        private fun publishSession(state: PageEditWebUiState) {
+            _uiState.update { current ->
+                if (current is PageEditWebUiState.Closing || current is PageEditWebUiState.Closed) current else state
+            }
         }
 
         /**
@@ -115,10 +132,11 @@ class PageEditWebViewModel
          */
         fun requestSession() {
             _uiState.value = PageEditWebUiState.Loading
-            viewModelScope.launch {
+            sessionJob?.cancel()
+            sessionJob = viewModelScope.launch {
                 val page = pageRepository.getPage(pageId)
                 if (page == null) {
-                    _uiState.value = PageEditWebUiState.Failed("Page is no longer cached locally")
+                    publishSession(PageEditWebUiState.Failed("Page is no longer cached locally"))
                     return@launch
                 }
                 // Probed here rather than on app launch: we're about to make
@@ -134,15 +152,19 @@ class PageEditWebViewModel
                 // before it ever reaches `loadUrl`.
                 when (val result = directEditingRepository.openSession(page)) {
                     is ApiResult.Success -> {
-                        _uiState.value = PageEditWebUiState.Loaded(
-                            url = result.data,
-                            clearCacheFirst = staleAssets,
+                        publishSession(
+                            PageEditWebUiState.Loaded(
+                                url = result.data,
+                                clearCacheFirst = staleAssets,
+                            ),
                         )
                     }
 
                     else -> {
-                        _uiState.value = PageEditWebUiState.Failed(
-                            result.userMessage() ?: "Couldn't open the collaborative editor",
+                        publishSession(
+                            PageEditWebUiState.Failed(
+                                result.userMessage() ?: "Couldn't open the collaborative editor",
+                            ),
                         )
                     }
                 }
@@ -183,6 +205,30 @@ class PageEditWebViewModel
         }
 
         /**
+         * U8: leave the editor, for Back and the toolbar arrow once Text has
+         * had its chance to save.
+         *
+         * While no editor ever ran — the session still being fetched, or
+         * refused — there is nothing Text could have saved and nothing to
+         * pull back, so this closes at once. It used to run [onClose]'s two
+         * round-trips first with Back swallowed, which on a dead network was
+         * two connect-and-read timeouts: about a minute and a half on a
+         * screen that had shown nothing but a spinner or an error.
+         */
+        fun leave() {
+            when (_uiState.value) {
+                PageEditWebUiState.Loading, is PageEditWebUiState.Failed -> {
+                    sessionJob?.cancel()
+                    _uiState.value = PageEditWebUiState.Closed
+                }
+
+                else -> {
+                    onClose()
+                }
+            }
+        }
+
+        /**
          * Called from the JS bridge (`close()`), the back press, or the
          * activity finish path. Pulls the server-side autosaved body back
          * into Room so PageView's observe-page Flow re-emits with the
@@ -198,6 +244,7 @@ class PageEditWebViewModel
          * sibling/tree changes Text might have made (rename, emoji)
          * come back too.
          */
+
         fun onClose() {
             // B-47: the JS bridge's `close()`, the toolbar close button and
             // the back-press escape hatch can all land inside the same
@@ -216,10 +263,16 @@ class PageEditWebViewModel
             }
             viewModelScope.launch {
                 try {
-                    pageRepository.getPage(pageId)?.let { page ->
-                        pageRepository.refresh(page.collectiveId)
+                    // U8: bounded. The page view revalidates its body when the
+                    // editor hands back, so a slow or dead network costs a
+                    // moment of stale text there rather than holding the
+                    // user on this spinner for the full HTTP timeouts.
+                    withTimeoutOrNull(CLOSE_SYNC_BUDGET_MS) {
+                        pageRepository.getPage(pageId)?.let { page ->
+                            pageRepository.refresh(page.collectiveId)
+                        }
+                        pageRepository.fetchBody(pageId)
                     }
-                    pageRepository.fetchBody(pageId)
                 } finally {
                     // Pop whatever the refresh did: stranding the user on a
                     // spinner that swallows back-presses would be worse than
@@ -230,3 +283,9 @@ class PageEditWebViewModel
             }
         }
     }
+
+/**
+ * U8: how long closing the collaborative editor waits for the server's copy
+ * of the page before it gives up and leaves the page view to revalidate.
+ */
+internal const val CLOSE_SYNC_BUDGET_MS = 5_000L

@@ -75,6 +75,8 @@ import kotlin.math.roundToInt
 @Composable
 internal fun PageViewScreen(
     innerPadding: PaddingValues,
+    editorReturned: Boolean,
+    onEditorReturnHandled: () -> Unit,
     onBack: () -> Unit,
     onEdit: () -> Unit,
     onEditWeb: () -> Unit,
@@ -88,6 +90,15 @@ internal fun PageViewScreen(
     val page by viewModel.page.collectAsStateWithLifecycle()
     val isFavorite by viewModel.isFavorite.collectAsStateWithLifecycle()
     val imageBaseUrl by viewModel.imageBaseUrl.collectAsStateWithLifecycle()
+
+    // U8: back from the collaborative editor, whose close may have run out
+    // of time before the server's copy of the page reached the cache.
+    LaunchedEffect(editorReturned) {
+        if (editorReturned) {
+            viewModel.refreshBody(userInitiated = false)
+            onEditorReturnHandled()
+        }
+    }
     val backlinks by viewModel.backlinks.collectAsStateWithLifecycle()
     val remoteAttachmentCount by viewModel.remoteAttachmentCount.collectAsStateWithLifecycle()
     val snackbarHostState = remember { SnackbarHostState() }

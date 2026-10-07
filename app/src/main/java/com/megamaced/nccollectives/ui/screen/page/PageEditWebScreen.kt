@@ -152,38 +152,44 @@ internal fun PageEditWebScreen(
         }
     }
 
-    BackHandler {
+    // U8: Back and the toolbar arrow are one request. The arrow used to
+    // call `onClose` directly, skipping the step that asks Text to save, so
+    // whatever was typed inside Text's autosave debounce could be lost.
+    val requestClose: () -> Unit = requestClose@{
         // B-47: a close is already in flight. Swallow the press rather than
         // letting it fall through and pop the screen out from under the
         // in-flight refresh — `viewModelScope` would cancel it and Room
         // would keep the pre-edit body.
         if (ui is PageEditWebUiState.Closing) {
-            Timber.tag(TAG).d("Back-press ignored while closing")
-            return@BackHandler
+            Timber.tag(TAG).d("Close request ignored while closing")
+            return@requestClose
         }
         val now = System.currentTimeMillis()
         val current = webView
-        if (current == null || now - lastBackPressMs < DOUBLE_BACK_WINDOW_MS) {
-            // Second back (or no WebView yet) — force-close. Text's
-            // autosave should have flushed whatever was typed within
-            // its debounce window, but anything in the gap is lost.
-            // This is the documented escape hatch in case the JS
+        val textIsRunning = current != null &&
+            (ui is PageEditWebUiState.Loaded || ui is PageEditWebUiState.Interactive)
+        if (!textIsRunning || now - lastBackPressMs < DOUBLE_BACK_WINDOW_MS) {
+            // No editor running (nothing to save), or a second request —
+            // leave now. Text's autosave should have flushed whatever was
+            // typed within its debounce window, but anything in the gap is
+            // lost. This is the documented escape hatch in case the JS
             // bridge never reports back.
-            Timber.tag(TAG).d("Force-close on double back-press")
-            viewModel.onClose()
+            Timber.tag(TAG).d("Leaving the editor without waiting for Text")
+            viewModel.leave()
         } else {
-            // First back — ask Text to save + close via the same
-            // `.icon-close` selector Notes-Android targets. The
-            // selector is an upstream CSS contract (see
-            // DirectEditingMobileInterface KDoc). When Text honours
-            // it, the JS bridge calls back into our `close()` which
-            // routes through viewModel.onClose() → state = Closed →
-            // the LaunchedEffect above pops the back stack.
-            Timber.tag(TAG).d("First back-press: injecting Text close")
+            // First request — ask Text to save + close via the same
+            // `.icon-close` selector Notes-Android targets. The selector
+            // is an upstream CSS contract (see DirectEditingMobileInterface
+            // KDoc). When Text honours it, the JS bridge calls back into
+            // our `close()` which routes through viewModel.onClose() →
+            // state = Closed → the LaunchedEffect above pops the back stack.
+            Timber.tag(TAG).d("First close request: injecting Text close")
             current.evaluateJavascript(JS_TEXT_CLOSE, null)
             lastBackPressMs = now
         }
     }
+
+    BackHandler(onBack = requestClose)
 
     Scaffold(
         modifier = Modifier.padding(innerPadding),
@@ -203,7 +209,7 @@ internal fun PageEditWebScreen(
                     // that can re-enter `onClose` is visibly inert while the
                     // two refresh round-trips are in flight.
                     IconButton(
-                        onClick = { viewModel.onClose() },
+                        onClick = requestClose,
                         enabled = ui !is PageEditWebUiState.Closing,
                     ) {
                         Icon(Icons.AutoMirrored.Filled.ArrowBack, contentDescription = "Close")
