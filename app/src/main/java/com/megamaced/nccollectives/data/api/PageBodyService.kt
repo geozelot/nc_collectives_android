@@ -1,6 +1,7 @@
 package com.megamaced.nccollectives.data.api
 
 import com.megamaced.nccollectives.data.ServerStringValidation
+import com.megamaced.nccollectives.data.auth.DavUserResolver
 import com.megamaced.nccollectives.data.auth.TokenStore
 import kotlinx.coroutines.CancellationException
 import kotlinx.coroutines.Dispatchers
@@ -76,7 +77,7 @@ sealed interface ConditionalBody {
  * Fetches and saves a page's markdown body over WebDAV. The Collectives REST
  * API only returns metadata — the markdown itself lives as a plain file in
  * the user's Files area under `{collectivePath}/{filePath}/{fileName}` and
- * is accessed via `GET`/`PUT` on `/remote.php/dav/files/{loginName}/...`.
+ * is accessed via `GET`/`PUT` on `/remote.php/dav/files/{user id}/...`.
  *
  * Uses the shared authenticated [OkHttpClient] so the [AuthInterceptor]
  * attaches Basic auth; [HostInterceptor] rewrites the placeholder URL we
@@ -88,13 +89,14 @@ class PageBodyService
     constructor(
         private val client: OkHttpClient,
         private val tokenStore: TokenStore,
+        private val davUserResolver: DavUserResolver,
     ) {
         suspend fun fetchBody(
             collectivePath: String,
             filePath: String,
             fileName: String,
         ): ApiResult<PageBody> {
-            val url = buildWebDavUrl(collectivePath, filePath, fileName) ?: return unbuildableUrl()
+            val url = buildWebDavUrl(collectivePath, filePath, fileName, davUserResolver.davUserId()) ?: return unbuildableUrl()
             val request = Request
                 .Builder()
                 .url(url)
@@ -125,7 +127,7 @@ class PageBodyService
             fileName: String,
             knownEtag: String,
         ): ApiResult<ConditionalBody> {
-            val url = buildWebDavUrl(collectivePath, filePath, fileName) ?: return unbuildableUrl()
+            val url = buildWebDavUrl(collectivePath, filePath, fileName, davUserResolver.davUserId()) ?: return unbuildableUrl()
             val request = Request
                 .Builder()
                 .url(url)
@@ -158,7 +160,7 @@ class PageBodyService
             body: String,
             baseEtag: String?,
         ): ApiResult<String?> {
-            val url = buildWebDavUrl(collectivePath, filePath, fileName) ?: return unbuildableUrl()
+            val url = buildWebDavUrl(collectivePath, filePath, fileName, davUserResolver.davUserId()) ?: return unbuildableUrl()
             val builder = Request
                 .Builder()
                 .url(url)
@@ -179,7 +181,7 @@ class PageBodyService
             filePath: String,
             directoryName: String,
         ): ApiResult<Unit> {
-            val url = buildWebDavUrl(collectivePath, filePath, directoryName, asCollection = true)
+            val url = buildWebDavUrl(collectivePath, filePath, directoryName, davUserResolver.davUserId(), asCollection = true)
                 ?: return unbuildableUrl()
             val request = Request
                 .Builder()
@@ -213,7 +215,7 @@ class PageBodyService
             fileName: String,
             body: RequestBody,
         ): ApiResult<String?> {
-            val url = buildWebDavUrl(collectivePath, filePath, fileName) ?: return unbuildableUrl()
+            val url = buildWebDavUrl(collectivePath, filePath, fileName, davUserResolver.davUserId()) ?: return unbuildableUrl()
             val request = Request
                 .Builder()
                 .url(url)
@@ -245,7 +247,7 @@ class PageBodyService
             localLength: Long,
             openLocal: () -> InputStream?,
         ): ApiResult<RemoteFileMatch> {
-            val url = buildWebDavUrl(collectivePath, filePath, fileName) ?: return unbuildableUrl()
+            val url = buildWebDavUrl(collectivePath, filePath, fileName, davUserResolver.davUserId()) ?: return unbuildableUrl()
             val request = Request
                 .Builder()
                 .url(url)
@@ -285,7 +287,7 @@ class PageBodyService
             filePath: String,
             fileName: String,
         ): ApiResult<Unit> {
-            val url = buildWebDavUrl(collectivePath, filePath, fileName) ?: return unbuildableUrl()
+            val url = buildWebDavUrl(collectivePath, filePath, fileName, davUserResolver.davUserId()) ?: return unbuildableUrl()
             val request = Request
                 .Builder()
                 .url(url)
@@ -312,7 +314,7 @@ class PageBodyService
             fileName: String,
             target: java.io.File,
         ): ApiResult<String?> {
-            val url = buildWebDavUrl(collectivePath, filePath, fileName) ?: return unbuildableUrl()
+            val url = buildWebDavUrl(collectivePath, filePath, fileName, davUserResolver.davUserId()) ?: return unbuildableUrl()
             val request = Request
                 .Builder()
                 .url(url)
@@ -422,7 +424,9 @@ class PageBodyService
             filePath: String,
             fileName: String,
         ): String =
-            buildWebDavUrl(collectivePath, filePath, fileName)
+            // Not suspend, so it can't ask the server for the user id (D12);
+            // it uses the one stored, which the first WebDAV call stores.
+            buildWebDavUrl(collectivePath, filePath, fileName, davUser = null)
                 // Keeps the throwing contract, unlike the `ApiResult`
                 // entry points above: this returns a bare `String` for Coil
                 // and `AttachmentRepositoryImpl.remoteUrlFor` already
@@ -456,11 +460,20 @@ class PageBodyService
                 IllegalStateException("Couldn't build the WebDAV URL: no credentials, or a rejected path segment"),
             )
 
-        /** Null when the URL can't be built — see [unbuildableUrl]. */
+        /**
+         * Null when the URL can't be built — see [unbuildableUrl].
+         *
+         * D12: the files root is the user's *id*, [davUser] from
+         * [DavUserResolver] where the caller could ask, else the one stored
+         * with the account, else the login name — which is the id on most
+         * servers, but not for an email or LDAP login, where the login name
+         * made every request 404.
+         */
         private fun buildWebDavUrl(
             collectivePath: String,
             filePath: String,
             fileName: String,
+            davUser: String?,
             asCollection: Boolean = false,
         ): String? {
             val credentials = tokenStore.getCredentials() ?: return null
@@ -470,7 +483,7 @@ class PageBodyService
                 .addPathSegment("remote.php")
                 .addPathSegment("dav")
                 .addPathSegment("files")
-                .addPathSegment(credentials.loginName)
+                .addPathSegment(davUser ?: credentials.davUserId ?: credentials.loginName)
             // S-14′: every server-supplied segment is validated before
             // being spliced into the URL. `addPathSegment` percent-encodes
             // an embedded `/` but leaves `..` intact — without this gate a

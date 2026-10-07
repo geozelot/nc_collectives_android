@@ -13,6 +13,7 @@ import com.megamaced.nccollectives.data.api.HostInterceptor
 import com.megamaced.nccollectives.data.api.PageBodyService
 import com.megamaced.nccollectives.data.auth.AccountGeneration
 import com.megamaced.nccollectives.data.auth.AuthState
+import com.megamaced.nccollectives.data.auth.DavUserResolver
 import com.megamaced.nccollectives.data.auth.SessionManager
 import com.megamaced.nccollectives.data.auth.StoredCredentials
 import com.megamaced.nccollectives.data.auth.TokenStore
@@ -280,6 +281,9 @@ internal class IntegrationEnvironment private constructor(
                     host = server.url("/").toString().trimEnd('/'),
                     loginName = LOGIN_NAME,
                     appPassword = "app-password",
+                    // D12: known already, so the tests that aren't about it
+                    // don't see a `cloud/user` request first.
+                    davUserId = LOGIN_NAME,
                 )
             val sessionManager = mockk<SessionManager>(relaxed = true)
             // A live session unless a test says otherwise: the workers do
@@ -311,7 +315,11 @@ internal class IntegrationEnvironment private constructor(
                 client = client,
                 api = NetworkModule.provideCollectivesApi(retrofit),
                 circlesApi = NetworkModule.provideCirclesApi(retrofit),
-                bodyService = PageBodyService(client, tokenStore),
+                bodyService = PageBodyService(
+                    client,
+                    tokenStore,
+                    DavUserResolver(tokenStore, NetworkModule.provideCloudUserService(retrofit)),
+                ),
                 accountGeneration = AccountGeneration(),
                 syncScheduler = SyncScheduler(context, UserPreferences(context)),
             )
