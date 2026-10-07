@@ -10,6 +10,7 @@ import android.webkit.SslErrorHandler
 import android.webkit.ValueCallback
 import android.webkit.WebChromeClient
 import android.webkit.WebResourceRequest
+import android.webkit.WebResourceResponse
 import android.webkit.WebView
 import android.webkit.WebViewClient
 import androidx.activity.compose.BackHandler
@@ -65,6 +66,7 @@ import com.megamaced.nccollectives.ui.attachment.openWithSystemHandler
 import com.megamaced.nccollectives.ui.theme.LocalTextScale
 import kotlinx.coroutines.delay
 import timber.log.Timber
+import java.io.ByteArrayInputStream
 import kotlin.math.roundToInt
 
 /**
@@ -609,6 +611,28 @@ private class StripChromeWebViewClient(
         }
     }
 
+    /**
+     * S-32: what the editor *loads*, as well as where it navigates.
+     *
+     * [shouldOverrideUrlLoading] gates navigations only. Every subresource a
+     * page in the editor named still loaded from wherever it pointed. That
+     * includes an image a collaborator embedded from a third-party host,
+     * which the native viewer refuses (S-24), and which turns into a
+     * tracking pixel the moment the page is opened for editing: a third
+     * party learns the user's IP address and when they edited. Requests off
+     * the user's server are answered here with an empty 403 and never leave
+     * the device. Non-network schemes (`data:`, `blob:`) are not affected.
+     */
+    override fun shouldInterceptRequest(
+        view: WebView?,
+        request: WebResourceRequest?,
+    ): WebResourceResponse? {
+        val url = request?.url ?: return null
+        if (subresourceAllowed(url.scheme, url.host, allowedHost)) return null
+        Timber.tag(TAG).d("Blocked a subresource from %s://%s", url.scheme, url.host)
+        return WebResourceResponse("text/plain", "utf-8", 403, "Blocked", emptyMap(), ByteArrayInputStream(ByteArray(0)))
+    }
+
     override fun onReceivedSslError(
         view: WebView?,
         handler: SslErrorHandler?,
@@ -802,6 +826,25 @@ internal fun shouldKeepInWebView(
     if (allowedHost.isNullOrEmpty() || targetHost.isNullOrEmpty()) return false
     return targetScheme.equals("https", ignoreCase = true) &&
         targetHost.equals(allowedHost, ignoreCase = true)
+}
+
+/**
+ * S-32: whether the editor WebView may fetch [scheme]://[host] for a page
+ * element. https on the signed-in server, or a subdomain of it, which is the
+ * same latitude the session URL itself is given. Anything else that would go
+ * over the network is refused. Non-network schemes stay allowed. A null
+ * [allowedHost] refuses every network request, failing closed like the
+ * navigation gate does.
+ */
+internal fun subresourceAllowed(
+    scheme: String?,
+    host: String?,
+    allowedHost: String?,
+): Boolean {
+    val lower = scheme?.lowercase() ?: return false
+    if (lower != "http" && lower != "https") return true
+    if (lower != "https" || allowedHost.isNullOrEmpty() || host.isNullOrEmpty()) return false
+    return host.equals(allowedHost, ignoreCase = true) || host.endsWith(".$allowedHost", ignoreCase = true)
 }
 
 /** Outcome of [decideNavigation]. */

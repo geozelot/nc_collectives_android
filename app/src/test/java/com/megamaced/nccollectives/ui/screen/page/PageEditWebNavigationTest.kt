@@ -136,4 +136,18 @@ class PageEditWebNavigationTest {
             assertFalse(scheme.toString(), isAllowedExternalScheme(scheme))
         }
     }
+
+    @Test
+    fun subresources_loadOnlyFromTheSignedInServer() {
+        // S-32: a third-party image in a page is a tracking pixel once the
+        // editor opens it.
+        assertTrue(subresourceAllowed("https", "cloud.example.com", "cloud.example.com"))
+        assertTrue(subresourceAllowed("https", "static.cloud.example.com", "cloud.example.com"))
+        assertFalse(subresourceAllowed("https", "tracker.example.net", "cloud.example.com"))
+        assertFalse(subresourceAllowed("https", "evilcloud.example.com", "cloud.example.com"))
+        assertFalse("cleartext, even same host", subresourceAllowed("http", "cloud.example.com", "cloud.example.com"))
+        assertFalse("no stored host fails closed", subresourceAllowed("https", "cloud.example.com", null))
+        assertTrue("data: never leaves the device", subresourceAllowed("data", null, "cloud.example.com"))
+        assertTrue(subresourceAllowed("blob", null, "cloud.example.com"))
+    }
 }
