@@ -65,6 +65,19 @@ object NetworkModule {
             // Keep TLS handshakes amortised across the rapid PROPFIND +
             // GET + ETag refresh sequence on a single page view (R-12).
             .connectionPool(ConnectionPool(maxIdleConnections = 5, keepAliveDuration = 5, TimeUnit.MINUTES))
+            // B-106: no redirects on the authenticated client. OkHttp turns a
+            // PUT into a GET on 301/302/303, so a redirected page write came
+            // back as a GET's 200 and was recorded as saved with the text
+            // written nowhere. And every hop after the first is outside
+            // HostInterceptor and AuthInterceptor, which are application
+            // interceptors: a same-host hop kept Basic auth on a path the
+            // policy never approved, and a cross-host 307/308 re-sent the
+            // request body (page text, attachment bytes) to the new host.
+            // A Nextcloud this app talks to answers at the address it was
+            // signed in with; a 3xx is an HttpError the caller reports.
+            // Login flow and the update check use their own clients.
+            .followRedirects(false)
+            .followSslRedirects(false)
             // Order is load-bearing (S-23): `hostInterceptor` runs first
             // because it is the one that decides whether a request's URL was
             // built by this app at all, refuses it if not, and stamps the
