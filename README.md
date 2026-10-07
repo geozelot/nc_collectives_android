@@ -123,6 +123,18 @@ Without signing env vars set, this produces an *unsigned* APK at `app/build/outp
 
 R8 minification is on for release builds and the output is deterministic — two consecutive `assembleRelease` runs at the same commit produce byte-identical APKs (matching SHA-256). That determinism is what lets F-Droid match its own rebuild against the signed release APK; a mirror of the recipe it builds from lives at [`docs/fdroid/com.megamaced.nccollectives.yml`](docs/fdroid/com.megamaced.nccollectives.yml). Release builds are around 4.9 MB; debug builds, which include the full debug tooling, are around 73 MB.
 
+### Building your own distribution
+
+A fork or repackager that ships its own APKs can give them their own identity without patching code. Put a `distribution.properties` next to `settings.gradle.kts`:
+
+```properties
+applicationId=org.example.collectives
+appName=Collectives (Example)
+repository=example/nc_collectives_android
+```
+
+`applicationId` makes the build install side by side with this app instead of colliding with it. `appName` is the launcher label. `repository` (GitHub `owner/name`) is where the in-app update check looks and what Settings → Source code opens: AGPL §6 asks a conveyed binary to point at its own source. Any key left out keeps this repository's value, and without the file the build is exactly this repository's.
+
 ## Contributing
 
 Issues and pull requests welcome. For larger changes, please open an issue first.

@@ -1,11 +1,15 @@
 package com.megamaced.nccollectives.data.api
 
+import com.megamaced.nccollectives.BuildConfig
 import kotlinx.serialization.SerialName
 import kotlinx.serialization.Serializable
 import retrofit2.http.GET
 
-/** The repository whose releases the update check reads and links to. */
-const val RELEASE_REPO = "megamaced/nc_collectives_android"
+/**
+ * The repository whose releases the update check reads and links to: the
+ * build's own, from distribution.properties (app/build.gradle.kts).
+ */
+const val RELEASE_REPO = BuildConfig.RELEASE_REPO
 
 /**
  * Single read against the GitHub Releases API to back the in-app update

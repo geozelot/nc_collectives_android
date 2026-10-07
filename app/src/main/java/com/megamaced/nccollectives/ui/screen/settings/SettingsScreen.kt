@@ -71,7 +71,10 @@ import com.megamaced.nccollectives.util.syncStatusLines
 import com.megamaced.nccollectives.util.unsentEditsLine
 import kotlinx.coroutines.launch
 
-private const val SOURCE_URL = "https://github.com/megamaced/nc_collectives_android"
+// The build's own source (distribution.properties' repository): AGPL §6 asks a
+// conveyed binary to point at its Corresponding Source, which for a fork's
+// build is the fork.
+private const val SOURCE_URL = BuildConfig.SOURCE_URL
 private const val LICENCE_URL = "https://www.gnu.org/licenses/agpl-3.0.html"
 private const val NO_BROWSER = "No browser on this device can open the link."
 
