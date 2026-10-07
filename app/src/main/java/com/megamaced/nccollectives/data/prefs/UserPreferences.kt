@@ -1,9 +1,11 @@
 package com.megamaced.nccollectives.data.prefs
 
 import android.content.Context
+import androidx.datastore.core.handlers.ReplaceFileCorruptionHandler
 import androidx.datastore.preferences.core.Preferences
 import androidx.datastore.preferences.core.booleanPreferencesKey
 import androidx.datastore.preferences.core.edit
+import androidx.datastore.preferences.core.emptyPreferences
 import androidx.datastore.preferences.core.longPreferencesKey
 import androidx.datastore.preferences.core.stringPreferencesKey
 import androidx.datastore.preferences.preferencesDataStore
@@ -11,6 +13,7 @@ import dagger.hilt.android.qualifiers.ApplicationContext
 import kotlinx.coroutines.flow.Flow
 import kotlinx.coroutines.flow.first
 import kotlinx.coroutines.flow.map
+import timber.log.Timber
 import javax.inject.Inject
 import javax.inject.Singleton
 
@@ -131,7 +134,21 @@ data class SyncStatus(
     val lastFailureMessage: String? = null,
 )
 
-private val Context.dataStore by preferencesDataStore(name = "user_prefs")
+/**
+ * A preferences file that won't parse — a write cut short by a crash or a
+ * full disk — made every read throw `CorruptionException`, and the first
+ * read is the theme, at launch: the app crashed on every start until the
+ * user cleared its data, and the accounts went with it. Start again from
+ * the defaults instead. Everything here is a setting the user can make
+ * again, or bookkeeping that rebuilds itself.
+ */
+internal val userPrefsCorruptionHandler =
+    ReplaceFileCorruptionHandler<Preferences> {
+        Timber.w("Preferences file unreadable; starting from the defaults")
+        emptyPreferences()
+    }
+
+private val Context.dataStore by preferencesDataStore(name = "user_prefs", corruptionHandler = userPrefsCorruptionHandler)
 
 @Singleton
 class UserPreferences
