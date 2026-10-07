@@ -249,6 +249,14 @@ internal fun SettingsScreen(
 
             HorizontalDivider()
 
+            SectionHeader("Privacy")
+            HideInRecentsRow(
+                checked = ui.hideInRecents,
+                onCheckedChange = viewModel::setHideInRecents,
+            )
+
+            HorizontalDivider()
+
             SectionHeader("Startup")
             Text(
                 "Open a collective straight away instead of the collective list. " +
@@ -660,6 +668,42 @@ private fun DefaultCollectiveOptions(
                 modifier = Modifier.padding(top = 4.dp),
             )
         }
+    }
+}
+
+/**
+ * S9: the Recents thumbnail is a picture of whatever page was open, kept
+ * where anyone holding the phone can see it. Android 13 can leave just the
+ * thumbnail out; before that the only switch the platform has also blocks
+ * screenshots and screen recording, and the description says so.
+ */
+@Composable
+private fun HideInRecentsRow(
+    checked: Boolean,
+    onCheckedChange: (Boolean) -> Unit,
+) {
+    Row(
+        modifier = Modifier
+            .fillMaxWidth()
+            .toggleable(value = checked, onValueChange = onCheckedChange, role = Role.Switch)
+            .padding(vertical = 8.dp),
+        verticalAlignment = Alignment.CenterVertically,
+        horizontalArrangement = Arrangement.spacedBy(12.dp),
+    ) {
+        Column(modifier = Modifier.weight(1f)) {
+            Text("Hide content in recent apps", style = MaterialTheme.typography.bodyLarge)
+            Text(
+                if (Build.VERSION.SDK_INT >= Build.VERSION_CODES.TIRAMISU) {
+                    "The app switcher shows a blank card instead of the open page."
+                } else {
+                    "The app switcher shows a blank card instead of the open page. " +
+                        "On this Android version that also blocks screenshots and screen recording."
+                },
+                style = MaterialTheme.typography.bodySmall,
+                color = MaterialTheme.colorScheme.onSurfaceVariant,
+            )
+        }
+        Switch(checked = checked, onCheckedChange = null)
     }
 }
 

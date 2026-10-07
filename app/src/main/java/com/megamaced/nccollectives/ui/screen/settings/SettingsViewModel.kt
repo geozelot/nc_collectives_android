@@ -48,6 +48,8 @@ data class SettingsUiState(
     val collectives: List<Collective>,
     /** Collective opened on launch, or null for the collective list. */
     val defaultCollectiveId: Long?,
+    /** S9: page text kept out of the Recents thumbnail. */
+    val hideInRecents: Boolean = false,
 )
 
 /**
@@ -162,6 +164,10 @@ class SettingsViewModel
 
         fun setThemeMode(mode: ThemeMode) {
             viewModelScope.launch { userPreferences.setThemeMode(mode) }
+        }
+
+        fun setHideInRecents(hide: Boolean) {
+            viewModelScope.launch { userPreferences.setHideInRecents(hide) }
         }
 
         fun setTextScale(scale: TextScale) {
@@ -304,5 +310,6 @@ class SettingsViewModel
                 // once `resolveStartupCollective` clears the stale id.
                 defaultCollectiveId = prefs.defaultCollectiveId
                     ?.takeIf { id -> collectives.any { it.id == id } },
+                hideInRecents = prefs.hideInRecents,
             )
     }

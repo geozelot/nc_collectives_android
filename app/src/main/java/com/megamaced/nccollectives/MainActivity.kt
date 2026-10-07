@@ -1,10 +1,14 @@
 package com.megamaced.nccollectives
 
+import android.app.Activity
 import android.content.Intent
+import android.os.Build
 import android.os.Bundle
+import android.view.WindowManager
 import androidx.activity.ComponentActivity
 import androidx.activity.compose.setContent
 import androidx.activity.enableEdgeToEdge
+import androidx.compose.runtime.LaunchedEffect
 import androidx.compose.runtime.SideEffect
 import androidx.core.splashscreen.SplashScreen.Companion.installSplashScreen
 import androidx.lifecycle.compose.collectAsStateWithLifecycle
@@ -67,6 +71,8 @@ class MainActivity : ComponentActivity() {
                 .value
             if (prefs != null) {
                 SideEffect { prefsLoaded = true }
+                // S9: applied whenever the setting changes, including at launch.
+                LaunchedEffect(prefs.hideInRecents) { applyHideInRecents(prefs.hideInRecents) }
                 NcCollectivesTheme(
                     themeMode = prefs.themeMode,
                     textScale = prefs.textScale,
@@ -145,5 +151,20 @@ class MainActivity : ComponentActivity() {
     private companion object {
         /** Marks a share intent this activity has already handed to the holder. */
         const val EXTRA_SHARE_HANDLED = "com.megamaced.nccollectives.SHARE_HANDLED"
+    }
+}
+
+/**
+ * S9: keep page text out of the Recents thumbnail. Android 13 can leave out
+ * just the thumbnail; before it, `FLAG_SECURE` is the only way, and it also
+ * blocks screenshots and screen recording — which the setting says.
+ */
+internal fun Activity.applyHideInRecents(hide: Boolean) {
+    if (Build.VERSION.SDK_INT >= Build.VERSION_CODES.TIRAMISU) {
+        setRecentsScreenshotEnabled(!hide)
+    } else if (hide) {
+        window.addFlags(WindowManager.LayoutParams.FLAG_SECURE)
+    } else {
+        window.clearFlags(WindowManager.LayoutParams.FLAG_SECURE)
     }
 }
