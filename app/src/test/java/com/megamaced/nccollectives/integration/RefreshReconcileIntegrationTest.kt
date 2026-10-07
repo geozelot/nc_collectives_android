@@ -5,6 +5,7 @@ import com.megamaced.nccollectives.data.api.ApiResult
 import com.megamaced.nccollectives.data.db.entity.AttachmentEntity
 import com.megamaced.nccollectives.data.db.entity.EditQueueEntity
 import com.megamaced.nccollectives.integration.IntegrationEnvironment.Companion.COLLECTIVE_ID
+import kotlinx.coroutines.runBlocking
 import kotlinx.coroutines.test.runTest
 import org.junit.After
 import org.junit.Assert.assertEquals
@@ -182,6 +183,33 @@ class RefreshReconcileIntegrationTest {
             assertEquals(setOf(LANDING, PARENT, CHILD), pageIds())
         }
 
+    @Test
+    fun aPageCreatedWhileTheListingWasInFlight_isNotDeletedByIt() =
+        runTest {
+            // B-104: the listing was requested before the page existed, so it
+            // can't name it. createPage writes the row with lastSyncedAt = now.
+            // Deleting it by this listing's say-so made a share into a new page
+            // look failed, and its retry created a duplicate on the server.
+            seedLandingAndChild()
+            servePages(
+                OcsResponses.pageList(
+                    OcsResponses.page(id = LANDING, title = "Landing"),
+                    OcsResponses.page(id = CHILD, title = "Child", parentId = LANDING),
+                ),
+            )
+            dispatcher.whileInFlight("/pages") {
+                runBlocking {
+                    env.db.pageDao().upsertAll(
+                        listOf(env.seedPage(id = NEW_PAGE, parentId = LANDING).copy(lastSyncedAt = System.currentTimeMillis() + 1)),
+                    )
+                }
+            }
+
+            env.pageRepository.refresh(COLLECTIVE_ID)
+
+            assertNotNull(env.db.pageDao().getById(NEW_PAGE))
+        }
+
     // --- Collective listings ---
 
     @Test
@@ -287,5 +315,6 @@ class RefreshReconcileIntegrationTest {
         const val CHILD = 41L
         const val UNRELATED = 42L
         const val OTHER_COLLECTIVE = 8L
+        const val NEW_PAGE = 99L
     }
 }
