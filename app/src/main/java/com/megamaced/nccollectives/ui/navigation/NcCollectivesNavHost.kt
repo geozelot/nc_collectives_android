@@ -2,6 +2,8 @@ package com.megamaced.nccollectives.ui.navigation
 
 import androidx.compose.foundation.layout.PaddingValues
 import androidx.compose.runtime.Composable
+import androidx.compose.runtime.getValue
+import androidx.lifecycle.compose.collectAsStateWithLifecycle
 import androidx.navigation.NavHostController
 import androidx.navigation.NavType
 import androidx.navigation.compose.NavHost
@@ -118,8 +120,19 @@ internal fun NcCollectivesNavHost(
             val pageId = checkNotNull(
                 backStackEntry.arguments?.getLong(Destination.PageView.ARG_PAGE_ID),
             )
+            // U8: set by the collaborative editor as it hands back. Its own
+            // close pulls the server's copy of the page in, but only for so
+            // long, so the page revalidates here too: a 304 when the editor
+            // already got it.
+            val editorReturned by backStackEntry.savedStateHandle
+                .getStateFlow(Destination.PageEditWeb.RESULT_RETURNED, false)
+                .collectAsStateWithLifecycle()
             PageViewScreen(
                 innerPadding = innerPadding,
+                editorReturned = editorReturned,
+                onEditorReturnHandled = {
+                    backStackEntry.savedStateHandle[Destination.PageEditWeb.RESULT_RETURNED] = false
+                },
                 onBack = { navController.popBackStack() },
                 // B-76: `launchSingleTop` — resolving the edit route is async
                 // (a server-capability probe on the first call per session), so
@@ -164,7 +177,12 @@ internal fun NcCollectivesNavHost(
         ) {
             PageEditWebScreen(
                 innerPadding = innerPadding,
-                onClose = { navController.popBackStack() },
+                onClose = {
+                    navController.previousBackStackEntry
+                        ?.savedStateHandle
+                        ?.set(Destination.PageEditWeb.RESULT_RETURNED, true)
+                    navController.popBackStack()
+                },
             )
         }
         composable(
