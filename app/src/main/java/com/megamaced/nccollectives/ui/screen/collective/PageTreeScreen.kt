@@ -327,7 +327,12 @@ private fun PageTreeList(
                             // (oldIdx, newIdx) pair mixed pre-drag and
                             // post-drag indices.
                             val newOrder = localNodes.map { it.page.id }
-                            if (newOrder != nodes.map { it.page.id }) {
+                            // U11: a drop that changes no sibling order puts
+                            // the tree back as it was, rather than leaving
+                            // the row drawn inside another row's subtree.
+                            if (siblingOrderAfterDrop(nodes, node.page.id, newOrder) == null) {
+                                localNodes = nodes
+                            } else {
                                 onReorder(node.page.id, newOrder)
                             }
                         },

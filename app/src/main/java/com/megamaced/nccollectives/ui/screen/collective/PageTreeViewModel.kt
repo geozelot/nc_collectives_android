@@ -415,21 +415,8 @@ class PageTreeViewModel
             newVisibleOrder: List<Long>,
         ) {
             val snapshot = nodes.value
-            val moved = snapshot.firstOrNull { it.page.id == movedPageId }?.page ?: return
-            val parentId = moved.parentId
-
-            val byId = snapshot.associateBy { it.page.id }
-            val newSiblingIds = newVisibleOrder
-                .mapNotNull { byId[it]?.page }
-                .filter { it.parentId == parentId }
-                .map { it.id }
-            if (newSiblingIds.size <= 1) return
-
-            val oldSiblingIds = snapshot
-                .map { it.page }
-                .filter { it.parentId == parentId }
-                .map { it.id }
-            if (newSiblingIds == oldSiblingIds) return
+            val parentId = snapshot.firstOrNull { it.page.id == movedPageId }?.page?.parentId ?: return
+            val newSiblingIds = siblingOrderAfterDrop(snapshot, movedPageId, newVisibleOrder) ?: return
 
             viewModelScope.launch {
                 val result = pageRepository.setSubpageOrder(
@@ -547,4 +534,34 @@ internal fun buildVisibleNodes(
     val landingPageId = byParent[0L]?.firstOrNull()?.id
     if (landingPageId != null) walk(parent = landingPageId)
     return out
+}
+
+/**
+ * The new order of [movedPageId]'s siblings after a drag left the visible tree
+ * as [newVisibleOrder], or null when the drop changed nothing a server could
+ * be told: the row landed among another row's children, or back where it
+ * started.
+ *
+ * U11: the screen uses the same answer to decide whether its local copy of
+ * the tree stands. A drop that changed nothing used to leave the dragged row
+ * drawn inside a sibling's subtree, where the server would never put it,
+ * until the next refresh.
+ */
+internal fun siblingOrderAfterDrop(
+    nodes: List<PageNode>,
+    movedPageId: Long,
+    newVisibleOrder: List<Long>,
+): List<Long>? {
+    val parentId = nodes.firstOrNull { it.page.id == movedPageId }?.page?.parentId ?: return null
+    val byId = nodes.associateBy { it.page.id }
+    val newSiblingIds = newVisibleOrder
+        .mapNotNull { byId[it]?.page }
+        .filter { it.parentId == parentId }
+        .map { it.id }
+    if (newSiblingIds.size <= 1) return null
+    val oldSiblingIds = nodes
+        .map { it.page }
+        .filter { it.parentId == parentId }
+        .map { it.id }
+    return newSiblingIds.takeUnless { it == oldSiblingIds }
 }
