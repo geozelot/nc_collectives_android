@@ -134,6 +134,7 @@ class AttachmentTombstoneIntegrationTest {
                             attachmentRepository = env.attachmentRepository,
                             pageRepository = env.pageRepository,
                             accountGeneration = env.accountGeneration,
+                            sessionManager = env.sessionManager,
                         )
                 },
             ).build()

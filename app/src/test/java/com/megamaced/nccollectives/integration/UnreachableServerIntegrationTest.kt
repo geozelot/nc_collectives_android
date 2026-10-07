@@ -105,6 +105,7 @@ class UnreachableServerIntegrationTest {
                             bodyService = env.bodyService,
                             database = env.db,
                             accountGeneration = env.accountGeneration,
+                            sessionManager = env.sessionManager,
                         )
                 },
             ).build()
