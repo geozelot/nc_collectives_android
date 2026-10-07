@@ -56,6 +56,8 @@ import androidx.compose.ui.platform.LocalContext
 import androidx.compose.ui.unit.dp
 import androidx.compose.ui.viewinterop.AndroidView
 import androidx.hilt.navigation.compose.hiltViewModel
+import androidx.lifecycle.Lifecycle
+import androidx.lifecycle.compose.LifecycleEventEffect
 import androidx.lifecycle.compose.collectAsStateWithLifecycle
 import androidx.webkit.WebSettingsCompat
 import androidx.webkit.WebViewFeature
@@ -112,6 +114,14 @@ internal fun PageEditWebScreen(
     // Holds the WebView reference for back-press JS injection (30d).
     // Set from the AndroidView factory; read by the BackHandler.
     var webView by remember { mutableStateOf<WebView?>(null) }
+
+    // The editor kept animating and running media in the background. Pause
+    // what `WebView.onPause` covers while the app isn't in front. Not
+    // `pauseTimers()`: Text sends the user's last keystrokes from its own
+    // timers, and stopping them could strand an edit on the device until the
+    // app came back — or lose it, if the process didn't.
+    LifecycleEventEffect(Lifecycle.Event.ON_PAUSE) { webView?.onPause() }
+    LifecycleEventEffect(Lifecycle.Event.ON_RESUME) { webView?.onResume() }
 
     // Timestamp of the last back-press, milliseconds (30d). First back
     // press injects the Text close button; if the user back-presses

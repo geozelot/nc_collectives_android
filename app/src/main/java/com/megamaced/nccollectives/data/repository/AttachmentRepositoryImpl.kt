@@ -176,7 +176,7 @@ class AttachmentRepositoryImpl
                 pageId = pageId,
                 fileName = resolvedName,
                 contentType = resolvedType,
-                size = stagedFile.length(),
+                size = withContext(Dispatchers.IO) { stagedFile.length() },
                 lastModifiedMs = System.currentTimeMillis(),
                 etag = null,
                 status = AttachmentEntity.STATUS_PENDING,
@@ -189,7 +189,7 @@ class AttachmentRepositoryImpl
             // are now redundant — the bytes live in the staged copy and
             // the worker reads from there. Drop the original so the
             // capture cache doesn't accumulate over the install lifetime.
-            deleteIfOwnFileProvider(sourceUri)
+            withContext(Dispatchers.IO) { deleteIfOwnFileProvider(sourceUri) }
             return resolvedName
         }
 
@@ -297,8 +297,12 @@ class AttachmentRepositoryImpl
                 // to be rid of (issue #35).
                 return ApiResult.Unexpected(IllegalStateException("$fileName is being deleted"))
             }
-            val staged = stagedFileFor(context, key)
-            if (!staged.exists() || staged.length() == 0L) {
+            // Off the main thread, like every other file access here: the
+            // callers are ViewModels.
+            val stagedBytes = withContext(Dispatchers.IO) {
+                stagedFileFor(context, key).let { if (it.exists()) it.length() else 0L }
+            }
+            if (stagedBytes == 0L) {
                 // Better to say so than to re-queue a row the worker will
                 // fail again for a reason the user can't see. The cache
                 // directory is evictable, and the two worker arms that drop
@@ -465,7 +469,7 @@ class AttachmentRepositoryImpl
             val filePath = if (refDir.isEmpty()) page.filePath else combinePath(page.filePath, refDir)
 
             val target = viewCacheFileFor(context, pageId, fileName)
-            target.parentFile?.mkdirs()
+            withContext(Dispatchers.IO) { target.parentFile?.mkdirs() }
             val result = bodyService.downloadTo(
                 collectivePath = page.collectivePath,
                 filePath = filePath,
@@ -477,7 +481,7 @@ class AttachmentRepositoryImpl
                 // viewer app on the next tap. Unchecked cast is the same
                 // idiom `ApiResult.mapSuccess` documents — every non-Success
                 // arm is `ApiResult<Nothing>`.
-                target.delete()
+                withContext(Dispatchers.IO) { target.delete() }
                 @Suppress("UNCHECKED_CAST")
                 return result as ApiResult<OpenableAttachment>
             }
