@@ -53,6 +53,8 @@ import androidx.compose.runtime.LaunchedEffect
 import androidx.compose.runtime.getValue
 import androidx.compose.runtime.mutableStateOf
 import androidx.compose.runtime.remember
+import androidx.compose.runtime.saveable.Saver
+import androidx.compose.runtime.saveable.listSaver
 import androidx.compose.runtime.saveable.rememberSaveable
 import androidx.compose.runtime.setValue
 import androidx.compose.ui.Modifier
@@ -99,10 +101,11 @@ internal fun PageEditScreen(
 
     // The caret is a view concern, so the `TextFieldValue` lives here — but
     // the text inside it is only a cache of the ViewModel's draft (B-71).
-    // `TextFieldValue.Saver` carries the caret through a configuration
-    // change; after process death the draft comes back from the ViewModel and
-    // the effect below reconciles the two.
-    var fieldValue by rememberSaveable(stateSaver = TextFieldValue.Saver) {
+    // U17: so only the caret is saved here. `TextFieldValue.Saver` saved the
+    // text as well, which put the page in the saved-state Bundle twice; the
+    // restored caret now goes back over the ViewModel's draft, which the
+    // effect below keeps in step.
+    var fieldValue by rememberSaveable(stateSaver = caretOnlySaver { viewModel.draftBody.value }) {
         mutableStateOf(TextFieldValue(draftBody))
     }
     var previewing by rememberSaveable { mutableStateOf(false) }
@@ -353,3 +356,18 @@ private fun ToolbarButton(
         Icon(imageVector = icon, contentDescription = description)
     }
 }
+
+/**
+ * U17: saves a [TextFieldValue]'s selection and nothing else, and restores
+ * it over [currentText], clamped to fit. The text is the ViewModel's draft,
+ * which saves itself; saving it here too doubled what a long page put
+ * through the Binder.
+ */
+internal fun caretOnlySaver(currentText: () -> String): Saver<TextFieldValue, Any> =
+    listSaver(
+        save = { listOf(it.selection.start, it.selection.end) },
+        restore = { (start, end) ->
+            val text = currentText()
+            TextFieldValue(text, TextRange(start.coerceIn(0, text.length), end.coerceIn(0, text.length)))
+        },
+    )
