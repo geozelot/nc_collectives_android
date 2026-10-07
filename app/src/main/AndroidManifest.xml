@@ -40,6 +40,16 @@
             android:value="false" />
 
         <!--
+            The system WebView that hosts the collaborative editor reports
+            usage metrics to Google when the user has opted into usage and
+            diagnostics on the device. The app talks only to the user's
+            server, so it opts out.
+        -->
+        <meta-data
+            android:name="android.webkit.WebView.MetricsOptOut"
+            android:value="true" />
+
+        <!--
             H6: rotation, a window resize (multi-window, foldables) and a
             hardware keyboard no longer recreate the activity. The UI is all
             Compose and recomposes for the new configuration, and recreation
