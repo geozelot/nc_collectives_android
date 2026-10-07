@@ -94,7 +94,7 @@ class MainActivity : ComponentActivity() {
         // intent, so the images stay readable; a grant that has gone is
         // handled downstream by the staging copy, which drops what it cannot
         // read and says so (issue #31).
-        SharePayload.fromSavedState(savedInstanceState)?.let(sharePayloadHolder::publish)
+        SharePayload.fromSavedState(savedInstanceState)?.foreignOnly(packageName)?.let(sharePayloadHolder::publish)
     }
 
     /**
@@ -110,7 +110,7 @@ class MainActivity : ComponentActivity() {
     private fun publishShareIfPresent(intent: Intent?) {
         if (intent == null) return
         if (intent.getBooleanExtra(EXTRA_SHARE_HANDLED, false)) return
-        val payload = SharePayload.fromIntent(intent) ?: return
+        val payload = SharePayload.fromIntent(intent)?.foreignOnly(packageName) ?: return
         intent.putExtra(EXTRA_SHARE_HANDLED, true)
         sharePayloadHolder.publish(payload)
     }
