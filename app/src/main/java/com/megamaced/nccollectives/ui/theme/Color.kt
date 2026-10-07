@@ -9,7 +9,13 @@ import androidx.compose.ui.graphics.Color
 // Passwords, Talk), paired with warm parchment neutrals to keep the
 // notebook character. The README's "Unofficial" disclaimer is the
 // affiliation cover; visually we lean into the suite.
-private val InkPrimary = Color(0xFF0082C9)
+// Theme T3: a step deeper than the brand's #0082C9, which the launcher icon
+// keeps. White on #0082C9 is 4.17:1 and #0082C9 on the parchment background
+// is 3.94:1, both short of WCAG AA's 4.5:1 for body text. Primary is the
+// colour of every filled button's label background, every text button, link
+// and selected control, so this was a large share of the "no contrast" report.
+// #0076B6 is 4.92:1 and 4.65:1 (ColorSchemeContrastTest).
+private val InkPrimary = Color(0xFF0076B6)
 private val InkOnPrimary = Color(0xFFFFFFFF)
 private val InkPrimaryContainer = Color(0xFFCDE5FF)
 private val InkOnPrimaryContainer = Color(0xFF001D36)
@@ -37,6 +43,21 @@ private val SurfaceVariantLight = Color(0xFFE0E2EC)
 private val OnSurfaceVariantLight = Color(0xFF44474E)
 private val OutlineLight = Color(0xFF74777F)
 private val OutlineVariantLight = Color(0xFFC4C6CF)
+
+// Theme T3: the M3 roles the scheme used to leave to the library's baseline,
+// which is purple-tinted. Every sheet, card, menu, dialog and the markdown
+// code and table backgrounds use the surface containers, so they drew
+// lilac panels on parchment. Tonal steps of the parchment neutral, from
+// lightest (lowest) to darkest (highest).
+private val SurfaceDimLight = Color(0xFFDCD9D4)
+private val SurfaceBrightLight = Color(0xFFFBF8F3)
+private val SurfaceContainerLowestLight = Color(0xFFFFFFFF)
+private val SurfaceContainerLowLight = Color(0xFFF5F2ED)
+private val SurfaceContainerLight = Color(0xFFEFECE7)
+private val SurfaceContainerHighLight = Color(0xFFEAE7E2)
+private val SurfaceContainerHighestLight = Color(0xFFE4E1DC)
+private val InverseSurfaceLight = Color(0xFF31302C)
+private val InverseOnSurfaceLight = Color(0xFFF3F0EB)
 
 private val InkPrimaryDark = Color(0xFF9BCAFF)
 private val InkOnPrimaryDark = Color(0xFF003258)
@@ -67,6 +88,18 @@ private val OnSurfaceVariantDark = Color(0xFFC4C6CF)
 private val OutlineDark = Color(0xFF8E9099)
 private val OutlineVariantDark = Color(0xFF44474E)
 
+// Theme T3: as for the light scheme, steps of the cool ink neutral.
+private val SurfaceDimDark = Color(0xFF13161B)
+private val SurfaceBrightDark = Color(0xFF393C42)
+private val SurfaceContainerLowestDark = Color(0xFF0E1116)
+private val SurfaceContainerLowDark = Color(0xFF1B1E23)
+private val SurfaceContainerDark = Color(0xFF1F2227)
+private val SurfaceContainerHighDark = Color(0xFF2A2D32)
+private val SurfaceContainerHighestDark = Color(0xFF35383D)
+private val InverseSurfaceDark = Color(0xFFE3E2E6)
+private val InverseOnSurfaceDark = Color(0xFF303035)
+private val InversePrimaryDark = Color(0xFF0061A4)
+
 internal val NcCollectivesLightColorScheme = lightColorScheme(
     primary = InkPrimary,
     onPrimary = InkOnPrimary,
@@ -92,6 +125,17 @@ internal val NcCollectivesLightColorScheme = lightColorScheme(
     onSurfaceVariant = OnSurfaceVariantLight,
     outline = OutlineLight,
     outlineVariant = OutlineVariantLight,
+    surfaceTint = InkPrimary,
+    inversePrimary = InkPrimaryDark,
+    inverseSurface = InverseSurfaceLight,
+    inverseOnSurface = InverseOnSurfaceLight,
+    surfaceDim = SurfaceDimLight,
+    surfaceBright = SurfaceBrightLight,
+    surfaceContainerLowest = SurfaceContainerLowestLight,
+    surfaceContainerLow = SurfaceContainerLowLight,
+    surfaceContainer = SurfaceContainerLight,
+    surfaceContainerHigh = SurfaceContainerHighLight,
+    surfaceContainerHighest = SurfaceContainerHighestLight,
 )
 
 internal val NcCollectivesDarkColorScheme = darkColorScheme(
@@ -119,4 +163,15 @@ internal val NcCollectivesDarkColorScheme = darkColorScheme(
     onSurfaceVariant = OnSurfaceVariantDark,
     outline = OutlineDark,
     outlineVariant = OutlineVariantDark,
+    surfaceTint = InkPrimaryDark,
+    inversePrimary = InversePrimaryDark,
+    inverseSurface = InverseSurfaceDark,
+    inverseOnSurface = InverseOnSurfaceDark,
+    surfaceDim = SurfaceDimDark,
+    surfaceBright = SurfaceBrightDark,
+    surfaceContainerLowest = SurfaceContainerLowestDark,
+    surfaceContainerLow = SurfaceContainerLowDark,
+    surfaceContainer = SurfaceContainerDark,
+    surfaceContainerHigh = SurfaceContainerHighDark,
+    surfaceContainerHighest = SurfaceContainerHighestDark,
 )
