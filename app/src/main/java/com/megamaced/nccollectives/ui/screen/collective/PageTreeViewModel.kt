@@ -418,11 +418,34 @@ class PageTreeViewModel
             val parentId = snapshot.firstOrNull { it.page.id == movedPageId }?.page?.parentId ?: return
             val newSiblingIds = siblingOrderAfterDrop(snapshot, movedPageId, newVisibleOrder) ?: return
 
+            commitSiblingOrder(parentId, newSiblingIds)
+        }
+
+        /**
+         * Move [pageId] one place up ([delta] = -1) or down (+1) among its
+         * siblings: the accessibility actions' way to do what a drag does,
+         * for anyone who can't long-press and drag.
+         */
+        fun moveAmongSiblings(
+            pageId: Long,
+            delta: Int,
+        ) {
+            val pages = nodes.value.map { it.page }
+            val moved = pages.firstOrNull { it.id == pageId } ?: return
+            val siblings = pages.filter { it.parentId == moved.parentId }.map { it.id }
+            val reordered = siblingOrderAfterMove(siblings, pageId, delta) ?: return
+            commitSiblingOrder(moved.parentId, reordered)
+        }
+
+        private fun commitSiblingOrder(
+            parentId: Long,
+            siblingIds: List<Long>,
+        ) {
             viewModelScope.launch {
                 val result = pageRepository.setSubpageOrder(
                     collectiveId = collectiveId,
                     parentPageId = parentId,
-                    subpageOrderIds = newSiblingIds,
+                    subpageOrderIds = siblingIds,
                 )
                 result.onFailureMessage { message ->
                     _uiState.update { it.copy(statusMessage = message) }
@@ -564,4 +587,20 @@ internal fun siblingOrderAfterDrop(
         .filter { it.parentId == parentId }
         .map { it.id }
     return newSiblingIds.takeUnless { it == oldSiblingIds }
+}
+
+/**
+ * [siblings] with [pageId] moved [delta] places, or null when it can't
+ * move that far (already first or last) or isn't among them.
+ */
+internal fun siblingOrderAfterMove(
+    siblings: List<Long>,
+    pageId: Long,
+    delta: Int,
+): List<Long>? {
+    val from = siblings.indexOf(pageId)
+    if (from < 0) return null
+    val to = from + delta
+    if (to !in siblings.indices || to == from) return null
+    return siblings.toMutableList().apply { add(to, removeAt(from)) }
 }
