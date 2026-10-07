@@ -1,9 +1,12 @@
 package com.megamaced.nccollectives.ui.screen.page
 
 import android.net.Uri
+import android.os.Bundle
+import androidx.core.os.bundleOf
 import androidx.lifecycle.SavedStateHandle
 import androidx.lifecycle.ViewModel
 import androidx.lifecycle.viewModelScope
+import com.megamaced.nccollectives.data.EditorDraftSpill
 import com.megamaced.nccollectives.data.api.ApiResult
 import com.megamaced.nccollectives.data.api.userMessage
 import com.megamaced.nccollectives.domain.model.SaveOutcome
@@ -56,6 +59,7 @@ class PageEditViewModel
         private val savedStateHandle: SavedStateHandle,
         private val repository: PageRepository,
         private val attachmentRepository: AttachmentRepository,
+        private val draftSpill: EditorDraftSpill,
     ) : ViewModel() {
         private val pageId: Long = checkNotNull(
             savedStateHandle.get<Long>(Destination.PageEdit.ARG_PAGE_ID),
@@ -81,13 +85,16 @@ class PageEditViewModel
          * was gone silently, and because the field matched `initialBody`
          * again, `hasUnsavedChanges` reported nothing to discard.
          *
-         * `SavedStateHandle` rather than a plain `MutableStateFlow` so the
-         * draft also survives process death, which is routine while the
-         * camera app is in front.
+         * Saved with the `SavedStateHandle` so the draft also survives process
+         * death, which is routine while the camera app is in front. U17: but
+         * written only when state is saved, by [saveDraft], and to a file
+         * rather than the Bundle once it is large.
          */
-        val draftBody: StateFlow<String> = savedStateHandle.getStateFlow(KEY_DRAFT, "")
+        private val _draftBody = MutableStateFlow(restoreDraft())
+        val draftBody: StateFlow<String> = _draftBody.asStateFlow()
 
         init {
+            savedStateHandle.setSavedStateProvider(KEY_DRAFT_STATE) { saveDraft() }
             load()
         }
 
@@ -161,11 +168,46 @@ class PageEditViewModel
         private fun seedDraft(body: String?) {
             if (body == null) return
             if (savedStateHandle.get<Boolean>(KEY_SEEDED) == true) return
-            savedStateHandle[KEY_DRAFT] = body
+            _draftBody.value = body
             // B-99: what the save is written against. Kept beside the draft
             // so it survives the same restarts.
             savedStateHandle[KEY_BASE] = bodyFingerprint(body)
             savedStateHandle[KEY_SEEDED] = true
+        }
+
+        /**
+         * U17: the draft as saved state carries it. Up to
+         * [INLINE_DRAFT_MAX_CHARS] it goes in the Bundle; past that only the
+         * name of a file [EditorDraftSpill] wrote. The editor used to keep
+         * the text in both this handle and the screen's `rememberSaveable`,
+         * so a page of about 250,000 characters put a megabyte through the
+         * Binder whenever the app went to the background, and crashed it.
+         */
+        private fun saveDraft(): Bundle {
+            val text = _draftBody.value
+            if (text.length <= INLINE_DRAFT_MAX_CHARS) return bundleOf(KEY_INLINE to text)
+            // A failed write leaves nothing to restore from; the next start
+            // seeds from the page again, which beats crashing on the way out.
+            return bundleOf(KEY_SPILLED to draftSpill.write(pageId, text))
+        }
+
+        /**
+         * The draft saved state brought back, or "" with the seeded flag
+         * cleared when there is none to bring back. A parked file that has
+         * gone (a sign-out wiped it) must not come back as an empty editor
+         * the user could save over the page.
+         */
+        private fun restoreDraft(): String {
+            val saved = savedStateHandle.get<Bundle>(KEY_DRAFT_STATE)
+            val restored = saved?.getString(KEY_INLINE)
+                ?: saved?.getString(KEY_SPILLED)?.let(draftSpill::read)
+            if (saved != null && restored == null) savedStateHandle[KEY_SEEDED] = false
+            return restored.orEmpty()
+        }
+
+        /** The editor is gone for good; so is anything it parked on disk. */
+        override fun onCleared() {
+            draftSpill.delete(pageId)
         }
 
         /**
@@ -196,7 +238,7 @@ class PageEditViewModel
             // the body fetch is still in flight it must not overwrite what the
             // user has already put in.
             savedStateHandle[KEY_SEEDED] = true
-            savedStateHandle[KEY_DRAFT] = body
+            _draftBody.value = body
         }
 
         fun save() {
@@ -242,13 +284,27 @@ class PageEditViewModel
         }
 
         private companion object {
-            /** Editor text, persisted across configuration change + process death. */
-            const val KEY_DRAFT = "pageEdit.draftBody"
+            /**
+             * Editor text, persisted across process death: a Bundle holding
+             * [KEY_INLINE] or [KEY_SPILLED]. A different key from the plain
+             * String the draft used to be saved under, so state saved by an
+             * older version can't come back as the wrong type.
+             */
+            const val KEY_DRAFT_STATE = "pageEdit.draft"
+            const val KEY_INLINE = "inline"
+            const val KEY_SPILLED = "spilled"
 
-            /** Whether [KEY_DRAFT] has been filled from the loaded body yet. */
+            /**
+             * U17: the longest draft kept in the Bundle, about 100 KB as
+             * UTF-16 — a tenth of what the whole activity's saved state may
+             * use.
+             */
+            const val INLINE_DRAFT_MAX_CHARS = 50_000
+
+            /** Whether the draft has been filled from the loaded body yet. */
             const val KEY_SEEDED = "pageEdit.seeded"
 
-            /** B-99: fingerprint of the body [KEY_DRAFT] was seeded from. */
+            /** B-99: fingerprint of the body the draft was seeded from. */
             const val KEY_BASE = "pageEdit.base"
         }
     }

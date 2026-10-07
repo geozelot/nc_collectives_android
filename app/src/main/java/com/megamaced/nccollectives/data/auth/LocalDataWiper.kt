@@ -6,6 +6,7 @@ import android.webkit.WebStorage
 import android.webkit.WebViewDatabase
 import androidx.room.withTransaction
 import coil3.SingletonImageLoader
+import com.megamaced.nccollectives.data.EditorDraftSpill
 import com.megamaced.nccollectives.data.db.NcCollectivesDatabase
 import com.megamaced.nccollectives.data.prefs.UserPreferences
 import com.megamaced.nccollectives.data.repository.AttachmentRepositoryImpl
@@ -101,6 +102,9 @@ class LocalDataWiper
             // them. Without this a PDF the previous account opened stays
             // readable on disk through the next account's session.
             AttachmentRepositoryImpl.clearCachedFiles(context)
+            // U17: editor drafts too large for saved state are parked on
+            // disk, and they are page text.
+            EditorDraftSpill.clearAll(context)
             // Coil keeps its own memory + disk caches, keyed on the
             // attachment's WebDAV URL, of every thumbnail fetched under
             // the previous credentials — the same class of on-disk
