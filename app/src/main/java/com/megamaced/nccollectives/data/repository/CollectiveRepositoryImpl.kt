@@ -131,17 +131,46 @@ class CollectiveRepositoryImpl
             // Optimistic local update so the UI reflects the new state
             // immediately. Roll back on failure.
             dao.updateFavoritePagesCsv(collectiveId, nextList.joinToString(","))
+            // The server keeps the favourites as one list and takes it whole,
+            // so the list sent has to start from the server's copy. Built
+            // from the cache, it removed every favourite added elsewhere
+            // since the last sync. When the server's copy can't be read, the
+            // cache is all there is, as before.
+            val serverList = apiCall { api.listCollectives() }
+                .let { it as? ApiResult.Success }
+                ?.data
+                ?.ocs
+                ?.data
+                ?.collectives
+                ?.firstOrNull { it.id == collectiveId }
+                ?.userFavoritePages
+            val toSend = serverList?.let { applyFavorite(it, pageId, favorite) } ?: nextList
             val result = apiCall {
-                api.setFavoritePages(collectiveId, nextList.toJsonLongArray())
+                api.setFavoritePages(collectiveId, toSend.toJsonLongArray())
             }
-            if (result !is ApiResult.Success) {
-                // D7b: a rollback is a write after a request too.
-                accountGeneration.commitIfCurrent(database, generation) {
+            // D7b: the cache update and the rollback are both writes after a
+            // request.
+            accountGeneration.commitIfCurrent(database, generation) {
+                if (result is ApiResult.Success) {
+                    dao.updateFavoritePagesCsv(collectiveId, toSend.joinToString(","))
+                } else {
                     dao.updateFavoritePagesCsv(collectiveId, current.userFavoritePagesCsv)
                 }
             }
             return result
         }
+
+        /** [list] with [pageId] in or out, keeping its order and everything else in it. */
+        private fun applyFavorite(
+            list: List<Long>,
+            pageId: Long,
+            favorite: Boolean,
+        ): List<Long> =
+            when {
+                favorite && pageId !in list -> list + pageId
+                favorite -> list
+                else -> list - pageId
+            }
 
         override suspend fun createCollective(
             name: String,
