@@ -2,7 +2,6 @@ package com.megamaced.nccollectives.ui.screen.login
 
 import android.content.Context
 import android.net.Uri
-import androidx.browser.customtabs.CustomTabsIntent
 import androidx.compose.foundation.layout.Arrangement
 import androidx.compose.foundation.layout.Column
 import androidx.compose.foundation.layout.PaddingValues
@@ -41,6 +40,7 @@ import androidx.compose.ui.unit.dp
 import androidx.hilt.navigation.compose.hiltViewModel
 import androidx.lifecycle.compose.collectAsStateWithLifecycle
 import com.megamaced.nccollectives.data.auth.AccountSummary
+import com.megamaced.nccollectives.ui.attachment.openInBrowser
 import com.megamaced.nccollectives.ui.components.SnackbarStatusEffect
 import timber.log.Timber
 
@@ -78,7 +78,9 @@ fun LoginScreen(
     var confirmRemove by rememberSaveable { mutableStateOf(false) }
 
     LaunchedEffect(uiState.loginUrl) {
-        uiState.loginUrl?.let { url -> launchCustomTab(context, url) }
+        uiState.loginUrl?.let { url ->
+            if (!launchCustomTab(context, url)) viewModel.onBrowserUnavailable()
+        }
     }
 
     LaunchedEffect(reauthAccount?.host) {
@@ -239,10 +241,11 @@ fun LoginScreen(
 
 private fun unsyncedEdits(count: Int): String = if (count == 1) "1 unsynced edit" else "$count unsynced edits"
 
+/** False when nothing was opened: a refused URL, or no browser on the device (U13). */
 private fun launchCustomTab(
     context: Context,
     url: String,
-) {
+): Boolean {
     val uri = runCatching { Uri.parse(url) }.getOrNull()
     // S-26: `launchUrl` resolves whatever scheme it is handed through the
     // system, so a server-supplied `intent:` / custom-scheme URL would
@@ -251,8 +254,9 @@ private fun launchCustomTab(
     // gate is the scheme half, held locally where the launch happens.
     if (uri == null || !uri.scheme.equals("https", ignoreCase = true)) {
         Timber.w("Refusing to open a login URL with scheme=%s", uri?.scheme)
-        return
+        return false
     }
-    val intent = CustomTabsIntent.Builder().build()
-    intent.launchUrl(context, uri)
+    // U13: `launchUrl` throws on a device with no browser at all, which took
+    // the whole app down at the first sign-in.
+    return openInBrowser(context, uri)
 }

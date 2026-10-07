@@ -1,5 +1,6 @@
 package com.megamaced.nccollectives.ui.attachment
 
+import android.content.ActivityNotFoundException
 import android.content.Context
 import android.net.Uri
 import androidx.activity.compose.rememberLauncherForActivityResult
@@ -12,6 +13,7 @@ import androidx.compose.runtime.saveable.rememberSaveable
 import androidx.compose.runtime.setValue
 import androidx.compose.ui.platform.LocalContext
 import androidx.core.content.FileProvider
+import timber.log.Timber
 import java.io.File
 import java.text.SimpleDateFormat
 import java.util.Date
@@ -30,7 +32,10 @@ import java.util.Locale
  * additional camera permission.
  */
 @Composable
-fun rememberCameraCapture(onCaptured: (Uri, String) -> Unit): CameraCapture {
+fun rememberCameraCapture(
+    onUnavailable: () -> Unit = {},
+    onCaptured: (Uri, String) -> Unit,
+): CameraCapture {
     val context = LocalContext.current
     // B-31: camera apps are memory-hungry, so the system frequently kills
     // our process while ACTION_IMAGE_CAPTURE is foregrounded. `remember`
@@ -59,7 +64,16 @@ fun rememberCameraCapture(onCaptured: (Uri, String) -> Unit): CameraCapture {
             val (uri, fileName) = newCaptureFile(context)
             pendingUri = uri
             pendingName = fileName
-            launcher.launch(uri)
+            // U13: a device with no camera app (work profiles, de-Googled
+            // ROMs, some tablets) throws here, out of a click handler.
+            try {
+                launcher.launch(uri)
+            } catch (e: ActivityNotFoundException) {
+                Timber.w(e, "No camera app to take a picture")
+                pendingUri = null
+                pendingName = null
+                onUnavailable()
+            }
         }
     }
 }

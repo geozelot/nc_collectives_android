@@ -1,7 +1,6 @@
 package com.megamaced.nccollectives.ui.screen.settings
 
 import android.net.Uri
-import androidx.browser.customtabs.CustomTabsIntent
 import androidx.compose.foundation.clickable
 import androidx.compose.foundation.layout.Arrangement
 import androidx.compose.foundation.layout.Box
@@ -44,6 +43,7 @@ import androidx.compose.runtime.LaunchedEffect
 import androidx.compose.runtime.getValue
 import androidx.compose.runtime.mutableStateOf
 import androidx.compose.runtime.remember
+import androidx.compose.runtime.rememberCoroutineScope
 import androidx.compose.runtime.setValue
 import androidx.compose.ui.Alignment
 import androidx.compose.ui.Modifier
@@ -63,11 +63,14 @@ import com.megamaced.nccollectives.data.prefs.SyncStatus
 import com.megamaced.nccollectives.data.prefs.TextScale
 import com.megamaced.nccollectives.data.prefs.ThemeMode
 import com.megamaced.nccollectives.domain.model.Collective
+import com.megamaced.nccollectives.ui.attachment.openInBrowser
 import com.megamaced.nccollectives.util.syncStatusLines
 import com.megamaced.nccollectives.util.unsentEditsLine
+import kotlinx.coroutines.launch
 
 private const val SOURCE_URL = "https://github.com/megamaced/nc_collectives_android"
 private const val LICENCE_URL = "https://www.gnu.org/licenses/agpl-3.0.html"
+private const val NO_BROWSER = "No browser on this device can open the link."
 
 @OptIn(ExperimentalMaterial3Api::class)
 @Composable
@@ -91,6 +94,8 @@ internal fun SettingsScreen(
     var pendingRemoval by remember { mutableStateOf<AccountSummary?>(null) }
     val pendingEdits by viewModel.pendingEditCount.collectAsStateWithLifecycle()
     val snackbarHostState = remember { SnackbarHostState() }
+    val snackbarScope = rememberCoroutineScope()
+    val noBrowser: () -> Unit = { snackbarScope.launch { snackbarHostState.showSnackbar(NO_BROWSER) } }
 
     // Side-effects for terminal manual-update-check states. UpdateAvailable
     // → open the release page in a Custom Tab and reset; UpToDate / Failed
@@ -99,7 +104,11 @@ internal fun SettingsScreen(
     LaunchedEffect(updateCheck) {
         when (val state = updateCheck) {
             is UpdateCheckUiState.UpdateAvailable -> {
-                CustomTabsIntent.Builder().build().launchUrl(context, Uri.parse(state.htmlUrl))
+                // U13: through the helper that survives a device with no
+                // browser, which `launchUrl` itself throws on.
+                if (!openInBrowser(context, Uri.parse(state.htmlUrl))) {
+                    snackbarHostState.showSnackbar(NO_BROWSER)
+                }
                 viewModel.dismissUpdateCheck()
             }
 
@@ -289,10 +298,10 @@ internal fun SettingsScreen(
                 onCheck = viewModel::checkForUpdate,
             )
             LinkRow(label = "Source code") {
-                CustomTabsIntent.Builder().build().launchUrl(context, Uri.parse(SOURCE_URL))
+                if (!openInBrowser(context, Uri.parse(SOURCE_URL))) noBrowser()
             }
             LinkRow(label = "Licence (AGPL-3.0)") {
-                CustomTabsIntent.Builder().build().launchUrl(context, Uri.parse(LICENCE_URL))
+                if (!openInBrowser(context, Uri.parse(LICENCE_URL))) noBrowser()
             }
 
             HorizontalDivider()

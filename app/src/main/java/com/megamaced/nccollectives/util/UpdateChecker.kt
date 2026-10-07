@@ -2,6 +2,8 @@ package com.megamaced.nccollectives.util
 
 import com.megamaced.nccollectives.BuildConfig
 import com.megamaced.nccollectives.data.api.GitHubReleaseService
+import com.megamaced.nccollectives.data.api.RELEASE_REPO
+import okhttp3.HttpUrl.Companion.toHttpUrlOrNull
 import timber.log.Timber
 import javax.inject.Inject
 import javax.inject.Singleton
@@ -52,7 +54,7 @@ class UpdateChecker
                 ?: return ManualCheckResult.Failed("This build's version (${BuildConfig.VERSION_NAME}) doesn't look like a version.")
 
             return if (latest > current) {
-                ManualCheckResult.UpdateAvailable(tag = release.tagName, htmlUrl = release.htmlUrl)
+                ManualCheckResult.UpdateAvailable(tag = release.tagName, htmlUrl = releasePageUrl(release.htmlUrl))
             } else {
                 ManualCheckResult.UpToDate
             }
@@ -122,4 +124,24 @@ internal fun parseSemVer(raw: String): SemVer? {
         minor = numbers.getOrElse(1) { 0 },
         patch = numbers.getOrElse(2) { 0 },
     )
+}
+
+/**
+ * S-30: the page an "update available" opens. The API's `html_url` only if
+ * it is an https page of [RELEASE_REPO]'s releases on github.com, otherwise
+ * that repository's latest-release page.
+ *
+ * The URL was handed to a Custom Tab as the API returned it, with no check
+ * at all. A response altered in transit by a TLS-intercepting proxy, a
+ * compromised CDN or a future API change could then point "Update
+ * available" at any page, or at any scheme the system resolves.
+ */
+internal fun releasePageUrl(htmlUrl: String): String {
+    val url = htmlUrl.toHttpUrlOrNull()
+    val trusted = url != null &&
+        url.scheme == "https" &&
+        url.host == "github.com" &&
+        url.port == 443 &&
+        url.encodedPath.startsWith("/$RELEASE_REPO/releases/")
+    return if (trusted) htmlUrl else "https://github.com/$RELEASE_REPO/releases/latest"
 }

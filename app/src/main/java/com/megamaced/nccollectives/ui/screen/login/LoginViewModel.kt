@@ -154,6 +154,16 @@ class LoginViewModel
             }
         }
 
+        /** U13: the sign-in page couldn't be shown because the device has no browser. */
+        fun onBrowserUnavailable() {
+            _uiState.update {
+                it.copy(
+                    loginUrl = null,
+                    error = "No browser on this device can show the Nextcloud sign-in page. Install one and try again.",
+                )
+            }
+        }
+
         fun dismissError() {
             _uiState.update { it.copy(error = null) }
         }

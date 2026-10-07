@@ -4,6 +4,9 @@ import kotlinx.serialization.SerialName
 import kotlinx.serialization.Serializable
 import retrofit2.http.GET
 
+/** The repository whose releases the update check reads and links to. */
+const val RELEASE_REPO = "megamaced/nc_collectives_android"
+
 /**
  * Single read against the GitHub Releases API to back the in-app update
  * check. Runs against `api.github.com` on a separate OkHttp/Retrofit pair
@@ -11,8 +14,9 @@ import retrofit2.http.GET
  * so the call doesn't carry the user's Nextcloud Basic-auth header from
  * [AuthInterceptor] or the host rewrite from [HostInterceptor].
  */
+
 interface GitHubReleaseService {
-    @GET("repos/megamaced/nc_collectives_android/releases/latest")
+    @GET("repos/$RELEASE_REPO/releases/latest")
     suspend fun latestRelease(): GitHubReleaseDto
 }
 
