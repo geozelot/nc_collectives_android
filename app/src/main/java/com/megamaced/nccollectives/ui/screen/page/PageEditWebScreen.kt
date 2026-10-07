@@ -53,6 +53,7 @@ import androidx.compose.ui.Alignment
 import androidx.compose.ui.Modifier
 import androidx.compose.ui.graphics.Color
 import androidx.compose.ui.graphics.luminance
+import androidx.compose.ui.graphics.toArgb
 import androidx.compose.ui.platform.LocalContext
 import androidx.compose.ui.unit.dp
 import androidx.compose.ui.viewinterop.AndroidView
@@ -245,6 +246,7 @@ internal fun PageEditWebScreen(
                         // we reach Interactive the load has already happened.
                         clearCacheFirst = (state as? PageEditWebUiState.Loaded)?.clearCacheFirst == true,
                         isDarkTheme = isDarkTheme,
+                        backgroundColor = MaterialTheme.colorScheme.background.toArgb(),
                         textZoom = textZoom,
                         allowedHost = viewModel.allowedHost,
                         onLoaded = viewModel::onEditorReady,
@@ -314,6 +316,7 @@ private fun EditorWebView(
     isInteractive: Boolean,
     clearCacheFirst: Boolean,
     isDarkTheme: Boolean,
+    backgroundColor: Int,
     textZoom: Int,
     allowedHost: String?,
     onLoaded: () -> Unit,
@@ -400,6 +403,9 @@ private fun EditorWebView(
             modifier = Modifier.fillMaxSize(),
             factory = { ctx ->
                 WebView(ctx).apply {
+                    // Theme T2: a WebView paints white until its page does,
+                    // which in a dark theme is a flash on every open.
+                    setBackgroundColor(backgroundColor)
                     settings.apply {
                         javaScriptEnabled = true
                         // Load-bearing beyond DOM storage: Text v34+ persists
