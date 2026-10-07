@@ -6,6 +6,8 @@ import androidx.compose.foundation.layout.Row
 import androidx.compose.foundation.layout.Spacer
 import androidx.compose.foundation.layout.fillMaxWidth
 import androidx.compose.foundation.layout.padding
+import androidx.compose.foundation.lazy.LazyColumn
+import androidx.compose.foundation.lazy.items
 import androidx.compose.foundation.text.KeyboardActions
 import androidx.compose.foundation.text.KeyboardOptions
 import androidx.compose.material.icons.Icons
@@ -72,13 +74,20 @@ fun TagPickerSheet(
                     color = MaterialTheme.colorScheme.onSurfaceVariant,
                 )
 
-                else -> Column(verticalArrangement = Arrangement.spacedBy(4.dp)) {
+                // A lazy list that takes only what the sheet has left: a
+                // collective with more tags than fit pushed "Create tag" and
+                // Done off the bottom with no way to scroll to them, or to
+                // the tags past the edge.
+                else -> LazyColumn(
+                    modifier = Modifier.weight(1f, fill = false),
+                    verticalArrangement = Arrangement.spacedBy(4.dp),
+                ) {
                     // One row per tag: FilterChip toggles membership on the
                     // current page (existing behaviour); the trailing
                     // arrow opens the Browse-by-tag screen (Batch 25).
                     // Both share the row but each owns its own click target
                     // so toggle and browse don't conflict.
-                    available.forEach { tag ->
+                    items(available, key = { it.id }) { tag ->
                         val selected = tag.name in selectedTagNames
                         Row(
                             modifier = Modifier.fillMaxWidth(),
