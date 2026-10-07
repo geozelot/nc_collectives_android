@@ -284,7 +284,7 @@ private fun AttachmentTile(
                 hasFailed -> {
                     Icon(
                         Icons.Filled.ErrorOutline,
-                        contentDescription = "Upload failed",
+                        contentDescription = "Upload of ${attachment.fileName} failed",
                         tint = MaterialTheme.colorScheme.error,
                         modifier = Modifier.padding(16.dp),
                     )
@@ -329,7 +329,7 @@ private fun AttachmentTile(
                 }
             }
             IconButton(onClick = onDelete) {
-                Icon(Icons.Filled.Delete, contentDescription = "Delete")
+                Icon(Icons.Filled.Delete, contentDescription = "Delete ${attachment.fileName}")
             }
         }
     }

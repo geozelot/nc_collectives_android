@@ -169,12 +169,12 @@ internal fun TrashRow(
             }
         }
         IconButton(onClick = onRestore) {
-            Icon(Icons.Filled.RestoreFromTrash, contentDescription = "Restore")
+            Icon(Icons.Filled.RestoreFromTrash, contentDescription = "Restore $title")
         }
         IconButton(onClick = onPurge) {
             Icon(
                 Icons.Filled.DeleteForever,
-                contentDescription = "Delete forever",
+                contentDescription = "Delete $title forever",
                 tint = MaterialTheme.colorScheme.error,
             )
         }

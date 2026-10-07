@@ -144,7 +144,11 @@ private fun TagBrowseRowItem(
         IconButton(onClick = onToggleFavorite) {
             Icon(
                 imageVector = if (row.isFavorite) Icons.Filled.Star else Icons.Outlined.StarBorder,
-                contentDescription = if (row.isFavorite) "Unfavorite" else "Favorite",
+                contentDescription = if (row.isFavorite) {
+                    "Remove ${row.page.title} from favorites"
+                } else {
+                    "Add ${row.page.title} to favorites"
+                },
                 tint = if (row.isFavorite) {
                     MaterialTheme.colorScheme.primary
                 } else {
