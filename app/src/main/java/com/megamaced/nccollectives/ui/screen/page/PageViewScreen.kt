@@ -477,7 +477,7 @@ internal fun PageViewScreen(
 
 @OptIn(ExperimentalMaterial3Api::class)
 @Composable
-private fun PageViewContent(
+internal fun PageViewContent(
     page: Page,
     body: String,
     imageBaseUrl: String?,
@@ -503,8 +503,13 @@ private fun PageViewContent(
     Column(
         modifier = Modifier
             .fillMaxSize()
-            .verticalScroll(scrollState)
+            // U2: measured *before* `verticalScroll`, which makes these the
+            // viewport's coordinates. After it they were the scrolled
+            // content's, so the difference below was already in content
+            // space, and adding the scroll on top made every jump from the
+            // page index overshoot by however far the page was scrolled.
             .onGloballyPositioned { viewportCoordinates = it }
+            .verticalScroll(scrollState)
             .padding(horizontal = 20.dp, vertical = 16.dp),
         verticalArrangement = Arrangement.spacedBy(12.dp),
     ) {
