@@ -41,6 +41,7 @@ import androidx.hilt.navigation.compose.hiltViewModel
 import androidx.lifecycle.compose.collectAsStateWithLifecycle
 import com.megamaced.nccollectives.data.auth.AccountSummary
 import com.megamaced.nccollectives.ui.attachment.openInBrowser
+import com.megamaced.nccollectives.ui.components.RefuseObscuredTouches
 import com.megamaced.nccollectives.ui.components.SnackbarStatusEffect
 import timber.log.Timber
 
@@ -102,6 +103,7 @@ fun LoginScreen(
                 )
             },
             confirmButton = {
+                RefuseObscuredTouches()
                 TextButton(onClick = {
                     confirmRemove = false
                     onRemoveAccount()
