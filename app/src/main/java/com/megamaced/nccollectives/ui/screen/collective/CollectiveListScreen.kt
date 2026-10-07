@@ -240,7 +240,7 @@ private fun CollectiveRow(
         )
         Box {
             IconButton(onClick = { menuExpanded = true }) {
-                Icon(Icons.Filled.MoreVert, contentDescription = "More")
+                Icon(Icons.Filled.MoreVert, contentDescription = "More options for ${collective.name}")
             }
             DropdownMenu(
                 expanded = menuExpanded,

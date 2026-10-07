@@ -380,7 +380,7 @@ private fun PageTreeItem(
                     } else {
                         Icons.AutoMirrored.Filled.KeyboardArrowRight
                     },
-                    contentDescription = if (isExpanded) "Collapse" else "Expand",
+                    contentDescription = if (isExpanded) "Collapse ${node.page.title}" else "Expand ${node.page.title}",
                     tint = MaterialTheme.colorScheme.onSurfaceVariant,
                 )
             }
@@ -414,7 +414,11 @@ private fun PageTreeItem(
         IconButton(onClick = onToggleFavorite) {
             Icon(
                 imageVector = if (node.isFavorite) Icons.Filled.Star else Icons.Outlined.StarBorder,
-                contentDescription = if (node.isFavorite) "Unfavorite" else "Favorite",
+                contentDescription = if (node.isFavorite) {
+                    "Remove ${node.page.title} from favorites"
+                } else {
+                    "Add ${node.page.title} to favorites"
+                },
                 tint = if (node.isFavorite) {
                     MaterialTheme.colorScheme.primary
                 } else {
@@ -425,7 +429,7 @@ private fun PageTreeItem(
         IconButton(onClick = onAddSubpage) {
             Icon(
                 imageVector = Icons.Filled.Add,
-                contentDescription = "New subpage",
+                contentDescription = "New subpage under ${node.page.title}",
                 tint = MaterialTheme.colorScheme.onSurfaceVariant,
             )
         }
