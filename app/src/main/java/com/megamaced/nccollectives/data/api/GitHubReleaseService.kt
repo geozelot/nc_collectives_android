@@ -1,5 +1,6 @@
 package com.megamaced.nccollectives.data.api
 
+import com.megamaced.nccollectives.BuildConfig
 import kotlinx.serialization.SerialName
 import kotlinx.serialization.Serializable
 import retrofit2.http.GET
@@ -12,7 +13,9 @@ import retrofit2.http.GET
  * [AuthInterceptor] or the host rewrite from [HostInterceptor].
  */
 interface GitHubReleaseService {
-    @GET("repos/megamaced/nc_collectives_android/releases/latest")
+    // The repository is the build's own (BuildConfig.RELEASE_REPO), so a
+    // build from a fork checks the fork's releases, not this one's.
+    @GET("repos/" + BuildConfig.RELEASE_REPO + "/releases/latest")
     suspend fun latestRelease(): GitHubReleaseDto
 }
 

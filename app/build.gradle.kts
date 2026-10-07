@@ -1,4 +1,5 @@
 import org.jetbrains.kotlin.gradle.dsl.JvmTarget
+import java.util.Properties
 
 plugins {
     alias(libs.plugins.android.application)
@@ -25,6 +26,32 @@ kotlin {
     }
 }
 
+// Distribution identity: who this build is. The defaults are this repository's
+// own, so its builds -- and F-Droid's reproducible build of them -- are
+// unchanged. A fork or a repackager that ships its own binaries puts an
+// optional distribution.properties next to settings.gradle.kts instead of
+// patching code:
+//
+//   applicationId  installs side by side with this app instead of fighting
+//                  it over the same id (and its update signature);
+//   appName        the launcher label;
+//   repository     owner/name on GitHub, which the in-app update check reads
+//                  and the Settings "Source code" link opens. AGPL §6 wants a
+//                  conveyed binary to point at *its* source.
+val distribution = Properties().apply {
+    val file = rootProject.file("distribution.properties")
+    if (file.isFile) file.inputStream().use { load(it) }
+}
+
+fun distributionValue(
+    key: String,
+    default: String,
+): String = distribution.getProperty(key)?.trim()?.takeIf { it.isNotEmpty() } ?: default
+
+val distributionApplicationId = distributionValue("applicationId", "com.megamaced.nccollectives")
+val distributionAppName = distributionValue("appName", "NC Collectives")
+val distributionRepository = distributionValue("repository", "megamaced/nc_collectives_android")
+
 // Release-signing config is sourced from environment variables so the keystore
 // never lands on disk in the repo. CI decodes ANDROID_RELEASE_KEYSTORE_BASE64
 // into a file and exports ANDROID_RELEASE_KEYSTORE_FILE for this script; local
@@ -46,11 +73,15 @@ android {
     compileSdk = 37
 
     defaultConfig {
-        applicationId = "com.megamaced.nccollectives"
+        applicationId = distributionApplicationId
         minSdk = 29
         targetSdk = 37
         versionCode = 37
         versionName = "2.12.1"
+
+        resValue("string", "app_name", distributionAppName)
+        buildConfigField("String", "RELEASE_REPO", "\"$distributionRepository\"")
+        buildConfigField("String", "SOURCE_URL", "\"https://github.com/$distributionRepository\"")
 
         testInstrumentationRunner = "androidx.test.runner.AndroidJUnitRunner"
         vectorDrawables { useSupportLibrary = true }
@@ -101,6 +132,8 @@ android {
     buildFeatures {
         compose = true
         buildConfig = true
+        // app_name, from distribution.properties (see the top of this file).
+        resValues = true
     }
 
     packaging {
