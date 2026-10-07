@@ -4,6 +4,8 @@ import android.content.Context
 import androidx.hilt.work.HiltWorker
 import androidx.work.CoroutineWorker
 import androidx.work.WorkerParameters
+import com.megamaced.nccollectives.data.auth.AuthState
+import com.megamaced.nccollectives.data.auth.SessionManager
 import dagger.assisted.Assisted
 import dagger.assisted.AssistedInject
 import timber.log.Timber
@@ -20,8 +22,19 @@ class SyncWorker
         @Assisted appContext: Context,
         @Assisted params: WorkerParameters,
         private val fullSync: FullSync,
+        private val sessionManager: SessionManager,
     ) : CoroutineWorker(appContext, params) {
         override suspend fun doWork(): Result {
+            // B-105: only for a live session. The account wipe cancels the
+            // work it can see, but a run can still start after it begins:
+            // sign-out's clearAll() resets the cadence and the collector
+            // re-enqueues the periodic sync, and every foreground enqueues
+            // a sync and both flushes. Such a run would pass the issue #20
+            // generation guard, which the wipe has already bumped, while
+            // the outgoing credential is still in the store, and so write
+            // that account's data into the cleared database. A switch,
+            // sign-out or re-auth in progress is no session to work for.
+            if (sessionManager.authState.value != AuthState.Authenticated) return Result.success()
             val isOneShot = inputData.getBoolean(KEY_ONE_SHOT, false)
             val outcome = fullSync.run()
             if (outcome is SyncOutcome.Retryable && isOneShot) {

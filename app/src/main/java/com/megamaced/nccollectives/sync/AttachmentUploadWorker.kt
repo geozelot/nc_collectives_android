@@ -9,6 +9,8 @@ import androidx.work.WorkerParameters
 import com.megamaced.nccollectives.data.api.ApiResult
 import com.megamaced.nccollectives.data.api.PageBodyService
 import com.megamaced.nccollectives.data.auth.AccountGeneration
+import com.megamaced.nccollectives.data.auth.AuthState
+import com.megamaced.nccollectives.data.auth.SessionManager
 import com.megamaced.nccollectives.data.db.dao.AttachmentDao
 import com.megamaced.nccollectives.data.db.dao.PageDao
 import com.megamaced.nccollectives.data.db.entity.AttachmentEntity
@@ -62,8 +64,12 @@ class AttachmentUploadWorker
         private val attachmentRepository: AttachmentRepository,
         private val pageRepository: PageRepository,
         private val accountGeneration: AccountGeneration,
+        private val sessionManager: SessionManager,
     ) : CoroutineWorker(appContext, params) {
         override suspend fun doWork(): Result {
+            // B-105: see SyncWorker. The staged rows wait for the session
+            // that owns them.
+            if (sessionManager.authState.value != AuthState.Authenticated) return Result.success()
             // Issue #20: the account this run's writes belong to. The status
             // updates below are `UPDATE`s and match nothing once the tables
             // have been cleared, but the success arm's upsert is an insert —

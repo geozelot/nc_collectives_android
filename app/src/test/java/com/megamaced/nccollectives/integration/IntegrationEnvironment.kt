@@ -12,6 +12,7 @@ import com.megamaced.nccollectives.data.api.CollectivesApiService
 import com.megamaced.nccollectives.data.api.HostInterceptor
 import com.megamaced.nccollectives.data.api.PageBodyService
 import com.megamaced.nccollectives.data.auth.AccountGeneration
+import com.megamaced.nccollectives.data.auth.AuthState
 import com.megamaced.nccollectives.data.auth.SessionManager
 import com.megamaced.nccollectives.data.auth.StoredCredentials
 import com.megamaced.nccollectives.data.auth.TokenStore
@@ -28,6 +29,7 @@ import com.megamaced.nccollectives.domain.repository.AttachmentRepository
 import com.megamaced.nccollectives.sync.SyncScheduler
 import io.mockk.every
 import io.mockk.mockk
+import kotlinx.coroutines.flow.MutableStateFlow
 import okhttp3.OkHttpClient
 import okhttp3.mockwebserver.MockWebServer
 import okhttp3.tls.HandshakeCertificates
@@ -279,6 +281,9 @@ internal class IntegrationEnvironment private constructor(
                     appPassword = "app-password",
                 )
             val sessionManager = mockk<SessionManager>(relaxed = true)
+            // A live session unless a test says otherwise: the workers do
+            // nothing without one (B-105).
+            every { sessionManager.authState } returns MutableStateFlow(AuthState.Authenticated)
 
             val client = NetworkModule
                 .provideOkHttpClient(
