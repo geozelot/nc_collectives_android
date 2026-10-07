@@ -346,17 +346,19 @@ internal fun PageViewScreen(
             modifier = Modifier.padding(scaffoldPadding).fillMaxSize(),
         ) {
             val currentPage = visiblePage
+            val bodyState = pageBodyState(
+                hasPage = currentPage != null,
+                hasBody = currentPage?.bodyMd != null,
+                isLoading = ui.isLoadingBody,
+                error = ui.errorMessage,
+            )
             when {
-                currentPage == null -> {
-                    LoadingState()
+                bodyState == PageBodyState.Error -> {
+                    ErrorState(message = ui.errorMessage.orEmpty(), onRetry = viewModel::refreshBody)
                 }
 
-                currentPage.bodyMd == null && ui.isLoadingBody -> {
+                bodyState == PageBodyState.Loading || currentPage == null -> {
                     LoadingState()
-                }
-
-                currentPage.bodyMd == null && ui.errorMessage != null -> {
-                    ErrorState(message = ui.errorMessage!!, onRetry = viewModel::refreshBody)
                 }
 
                 else -> {
@@ -593,3 +595,24 @@ private val OUTLINE_SCROLL_HEADROOM = 12.dp
 
 /** Below this, the index would list fewer places than it costs a tap to open. */
 private const val MIN_HEADINGS_FOR_INDEX = 2
+
+/** What [PageViewScreen] draws in place of the page body, before it has one. */
+internal enum class PageBodyState { Loading, Error, Content }
+
+/**
+ * U4: the error comes first. A search hit for a page this device has never
+ * cached opens with no page row at all. The load fails at once ("not
+ * cached"), but the `page == null → spinner` arm was checked first, so the
+ * failure never showed and the spinner turned forever.
+ */
+internal fun pageBodyState(
+    hasPage: Boolean,
+    hasBody: Boolean,
+    isLoading: Boolean,
+    error: String?,
+): PageBodyState =
+    when {
+        !hasBody && error != null && !isLoading -> PageBodyState.Error
+        !hasPage || (!hasBody && isLoading) -> PageBodyState.Loading
+        else -> PageBodyState.Content
+    }
