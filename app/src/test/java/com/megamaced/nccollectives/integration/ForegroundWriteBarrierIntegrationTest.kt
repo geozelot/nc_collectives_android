@@ -299,7 +299,12 @@ class ForegroundWriteBarrierIntegrationTest {
     private fun switchAccountAndLoseTheConnection() {
         every { env.tokenStore.getCredentials() } answers {
             env.accountGeneration.invalidate()
-            StoredCredentials(host = "https://localhost:1", loginName = IntegrationEnvironment.LOGIN_NAME, appPassword = "x")
+            StoredCredentials(
+                host = "https://localhost:1",
+                loginName = IntegrationEnvironment.LOGIN_NAME,
+                appPassword = "x",
+                davUserId = IntegrationEnvironment.LOGIN_NAME,
+            )
         }
     }
 

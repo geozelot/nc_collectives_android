@@ -8,6 +8,7 @@ import com.megamaced.nccollectives.data.auth.AccountSummary
 import com.megamaced.nccollectives.data.auth.AccountSwitcher
 import com.megamaced.nccollectives.data.auth.AppPasswordRevoker
 import com.megamaced.nccollectives.data.auth.AuthState
+import com.megamaced.nccollectives.data.auth.DavUserResolver
 import com.megamaced.nccollectives.data.auth.LocalDataWiper
 import com.megamaced.nccollectives.data.auth.SessionManager
 import com.megamaced.nccollectives.data.auth.WebViewHttpCache
@@ -17,6 +18,7 @@ import com.megamaced.nccollectives.data.db.entity.EditQueueEntity
 import com.megamaced.nccollectives.data.prefs.UserPreferences
 import com.megamaced.nccollectives.share.SharePayloadHolder
 import io.mockk.every
+import io.mockk.mockk
 import io.mockk.verify
 import kotlinx.coroutines.test.runTest
 import org.junit.After
@@ -95,7 +97,13 @@ class SessionExpiryIntegrationTest {
             appPasswordRevoker = AppPasswordRevoker(client),
         )
         accountSwitcher = switcher
-        bodyService = PageBodyService(client, env.tokenStore)
+        bodyService = PageBodyService(
+            client,
+            env.tokenStore,
+            // The environment's credential already carries the user id, so
+            // this never asks the server.
+            DavUserResolver(env.tokenStore, mockk(relaxed = true)),
+        )
     }
 
     @After
