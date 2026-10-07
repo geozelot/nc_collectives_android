@@ -79,7 +79,8 @@ fun LoginScreen(
 
     LaunchedEffect(uiState.loginUrl) {
         uiState.loginUrl?.let { url ->
-            if (!launchCustomTab(context, url)) viewModel.onBrowserUnavailable()
+            // U13 + U16: opened, so stop offering it; or there is no browser.
+            if (launchCustomTab(context, url)) viewModel.onLoginPageOpened() else viewModel.onBrowserUnavailable()
         }
     }
 
@@ -198,6 +199,10 @@ fun LoginScreen(
                     style = MaterialTheme.typography.bodyMedium,
                     color = MaterialTheme.colorScheme.onSurfaceVariant,
                 )
+                // U16: a way out if the browser was closed before signing in.
+                TextButton(onClick = viewModel::cancelLogin) {
+                    Text("Stop waiting")
+                }
             }
 
             if (onRetry != null) {
