@@ -4,6 +4,7 @@ import androidx.activity.compose.BackHandler
 import androidx.activity.compose.rememberLauncherForActivityResult
 import androidx.activity.result.PickVisualMediaRequest
 import androidx.activity.result.contract.ActivityResultContracts
+import androidx.compose.foundation.horizontalScroll
 import androidx.compose.foundation.layout.Arrangement
 import androidx.compose.foundation.layout.Box
 import androidx.compose.foundation.layout.Column
@@ -11,6 +12,7 @@ import androidx.compose.foundation.layout.PaddingValues
 import androidx.compose.foundation.layout.WindowInsets
 import androidx.compose.foundation.layout.consumeWindowInsets
 import androidx.compose.foundation.layout.fillMaxSize
+import androidx.compose.foundation.layout.fillMaxWidth
 import androidx.compose.foundation.layout.imePadding
 import androidx.compose.foundation.layout.padding
 import androidx.compose.foundation.rememberScrollState
@@ -318,12 +320,18 @@ internal fun PageEditScreen(
 }
 
 @Composable
-private fun MarkdownToolbar(
+internal fun MarkdownToolbar(
     onAction: ((TextFieldValue) -> TextFieldValue) -> Unit,
     onInsertImage: () -> Unit,
 ) {
     androidx.compose.foundation.layout.Row(
+        // U6: nine 48 dp buttons are 432 dp, wider than most phones. Without a
+        // scroll the Row handed the last ones whatever width was left, so
+        // "Insert image" and "Inline code" were squashed to nothing on a
+        // typical 360-412 dp screen.
         modifier = Modifier
+            .fillMaxWidth()
+            .horizontalScroll(rememberScrollState())
             .padding(horizontal = 4.dp, vertical = 4.dp),
         horizontalArrangement = Arrangement.spacedBy(0.dp),
     ) {
