@@ -21,11 +21,12 @@ import javax.inject.Inject
 
 /**
  * State for [PageEditWebScreen]. The `Loaded(url)` state carries the
- * single-use signed URL returned by `directediting/open`; reloading the
- * WebView with that URL (config change, process death) invalidates the
- * token and forces a re-request, which is why neither this state nor
- * the URL itself is `rememberSaveable` — every fresh ViewModel instance
- * fetches a fresh URL.
+ * single-use signed URL returned by `directediting/open`. Neither this state
+ * nor the URL is `rememberSaveable`, so after process death a fresh ViewModel
+ * fetches a fresh URL. An Activity recreation keeps the nav-scoped ViewModel,
+ * and with it a URL whose token the first WebView already spent. H6:
+ * [PageEditWebViewModel.claimUrl] is what makes the rebuilt WebView ask for a
+ * new session instead of loading that one.
  */
 sealed interface PageEditWebUiState {
     data object Loading : PageEditWebUiState
@@ -147,6 +148,33 @@ class PageEditWebViewModel
                     }
                 }
             }
+        }
+
+        /**
+         * The session URL most recently handed to a WebView. Not saved state:
+         * a new ViewModel requests a new URL anyway.
+         */
+        private var claimedUrl: String? = null
+
+        /**
+         * H6: hand [url] to a WebView, once. True the first time it is asked
+         * for, and false afterwards, because by then a WebView has spent its
+         * one-shot `directediting` token. The case is an Activity recreation
+         * that the manifest's `configChanges` doesn't cover (a dark-mode flip,
+         * a wallpaper palette change, a font-scale change). The ViewModel
+         * survives it holding `Loaded`/`Interactive` with the spent URL, and
+         * the rebuilt WebView used to load it into an error page. A `false`
+         * here means "ask for a fresh session" ([onUrlSpent]).
+         */
+        fun claimUrl(url: String): Boolean {
+            if (claimedUrl == url) return false
+            claimedUrl = url
+            return true
+        }
+
+        /** H6: the WebView found its URL already spent; open a new session. */
+        fun onUrlSpent() {
+            requestSession()
         }
 
         /**
