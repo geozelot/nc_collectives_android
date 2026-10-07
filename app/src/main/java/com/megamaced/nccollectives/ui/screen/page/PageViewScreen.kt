@@ -1,5 +1,6 @@
 package com.megamaced.nccollectives.ui.screen.page
 
+import android.widget.Toast
 import androidx.compose.foundation.ScrollState
 import androidx.compose.foundation.layout.Arrangement
 import androidx.compose.foundation.layout.Box
@@ -229,8 +230,15 @@ internal fun PageViewScreen(
                                 editScope.launch {
                                     try {
                                         val decision = viewModel.resolveEditRoute()
+                                        // U3: not a snackbar. showSnackbar
+                                        // suspends until it is dismissed, so the
+                                        // editor opened only after the notice
+                                        // timed out, about four seconds of a
+                                        // dead Edit button. And a snackbar on
+                                        // this screen leaves with it. A toast
+                                        // outlives the navigation.
                                         decision.fallbackMessage?.let { msg ->
-                                            snackbarHostState.showSnackbar(msg)
+                                            Toast.makeText(context, msg, Toast.LENGTH_LONG).show()
                                         }
                                         when (decision.route) {
                                             EditRoute.Plain -> onEdit()
