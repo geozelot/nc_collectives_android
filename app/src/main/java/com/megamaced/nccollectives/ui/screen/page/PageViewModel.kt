@@ -193,9 +193,18 @@ class PageViewModel
                 )
             }
             viewModelScope.launch {
-                val hadCachedBody = pageRepository.getPage(pageId)?.bodyMd != null
+                val cached = pageRepository.getPage(pageId)
+                val hadCachedBody = cached?.bodyMd != null
                 val result = pageRepository.refreshBodyIfChanged(pageId)
-                val failure = result.userMessage()
+                // U4: nothing on this device to load the body *for*: a search
+                // hit for a page in a collective that hasn't synced here yet.
+                // Say so, rather than the generic error the missing row
+                // produces.
+                val failure = if (cached == null && result !is ApiResult.Success) {
+                    "This page isn't on this device yet. Sync (Settings → Sync now), then open it again."
+                } else {
+                    result.userMessage()
+                }
                 _uiState.update { state ->
                     state.copy(
                         isLoadingBody = false,
