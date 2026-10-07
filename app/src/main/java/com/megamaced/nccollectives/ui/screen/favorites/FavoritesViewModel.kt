@@ -8,6 +8,7 @@ import com.megamaced.nccollectives.domain.repository.PageRepository
 import com.megamaced.nccollectives.ui.screen.STOP_TIMEOUT_MS
 import dagger.hilt.android.lifecycle.HiltViewModel
 import kotlinx.coroutines.ExperimentalCoroutinesApi
+import kotlinx.coroutines.coroutineScope
 import kotlinx.coroutines.flow.SharingStarted
 import kotlinx.coroutines.flow.StateFlow
 import kotlinx.coroutines.flow.combine
@@ -78,10 +79,20 @@ class FavoritesViewModel
             // Previously this used `.collect { … return@collect }`, which
             // doesn't unsubscribe — every favourite toggle re-triggered a
             // refresh fan-out across every collective (B-8 / R-6).
+            //
+            // Only the collectives that hold a favourite: no other one can
+            // contribute a row, and refreshing every collective cost two
+            // requests apiece on every open — sixty for an account in thirty
+            // collectives. Concurrently, as FullSync does.
             viewModelScope.launch {
                 collectiveRepository.refresh()
-                val list = collectiveRepository.observeCollectives().first()
-                list.forEach { c -> pageRepository.refresh(c.id) }
+                val withFavorites = collectiveRepository
+                    .observeCollectives()
+                    .first()
+                    .filter { it.favoritePageIds.isNotEmpty() }
+                coroutineScope {
+                    withFavorites.forEach { c -> launch { pageRepository.refresh(c.id) } }
+                }
             }
         }
     }
