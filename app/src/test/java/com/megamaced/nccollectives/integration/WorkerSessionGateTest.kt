@@ -155,6 +155,7 @@ class WorkerSessionGateTest {
                                     pageRepository = env.pageRepository,
                                     accountGeneration = env.accountGeneration,
                                     sessionManager = session,
+                                    database = env.db,
                                 )
                             }
                         }
