@@ -106,6 +106,11 @@ internal fun PageEditWebScreen(
     // diverge from the OS setting. Luminance < 0.5 is the standard
     // contrast-based dark/light split.
     val isDarkTheme = MaterialTheme.colorScheme.background.luminance() < 0.5f
+    // Theme T4: the editor wears the app's colours, in both modes.
+    val colorScheme = MaterialTheme.colorScheme
+    val injectionScript = remember(colorScheme, isDarkTheme) {
+        buildInjectionScript(editorThemeCss(EditorPalette.from(colorScheme, isDarkTheme)))
+    }
 
     // Text-size preference, translated into the WebView's own units. The
     // app's typography can't reach inside the WebView — Text ships its
@@ -247,6 +252,7 @@ internal fun PageEditWebScreen(
                         clearCacheFirst = (state as? PageEditWebUiState.Loaded)?.clearCacheFirst == true,
                         isDarkTheme = isDarkTheme,
                         backgroundColor = MaterialTheme.colorScheme.background.toArgb(),
+                        injectionScript = injectionScript,
                         textZoom = textZoom,
                         allowedHost = viewModel.allowedHost,
                         onLoaded = viewModel::onEditorReady,
@@ -317,6 +323,7 @@ private fun EditorWebView(
     clearCacheFirst: Boolean,
     isDarkTheme: Boolean,
     backgroundColor: Int,
+    injectionScript: String,
     textZoom: Int,
     allowedHost: String?,
     onLoaded: () -> Unit,
@@ -473,7 +480,7 @@ private fun EditorWebView(
                     addJavascriptInterface(bridge, DirectEditingMobileInterface.NAME)
                     webViewClient = StripChromeWebViewClient(
                         onSslError = onSslError,
-                        injectionScript = buildInjectionScript(isDarkTheme),
+                        injectionScript = injectionScript,
                         allowedHost = allowedHost,
                         onExternalLink = openExternally,
                     )
@@ -508,7 +515,18 @@ private fun EditorWebView(
             // live without reloading the session, so re-apply it here
             // rather than leaving the editor stuck at whatever the
             // preference was when it opened.
-            update = { it.settings.textZoom = textZoom },
+            update = { webView ->
+                webView.settings.textZoom = textZoom
+                // Theme T4: a palette change (the Material You switch, a
+                // wallpaper palette, the theme mode where the activity isn't
+                // recreated) restyles the live editor instead of waiting for
+                // the next page load, and without reloading the session.
+                val client = webView.webViewClient as? StripChromeWebViewClient
+                if (client != null && client.injectionScript != injectionScript) {
+                    client.injectionScript = injectionScript
+                    webView.evaluateJavascript(injectionScript, null)
+                }
+            },
             // B-46: the WebView has to be torn down explicitly when the
             // editor leaves composition — popped after `Closed`, or replaced
             // by the Loading arm when the JS bridge asks for a fresh session.
@@ -558,7 +576,12 @@ private fun EditorWebView(
  */
 private class StripChromeWebViewClient(
     private val onSslError: () -> Unit,
-    private val injectionScript: String,
+    /**
+     * Theme T4: replaced when the app's colours change. The page itself is
+     * updated with `evaluateJavascript`, and this is what the next page load
+     * injects.
+     */
+    var injectionScript: String,
     private val allowedHost: String?,
     private val onExternalLink: (Uri) -> Unit,
 ) : WebViewClient() {
@@ -665,11 +688,10 @@ private class StripChromeWebViewClient(
  *    `display: none` the Files-app shell selectors we know wrap the
  *    embedded editor (top header — that's the "blue rail" on a narrow
  *    viewport — left navigation, right details sidebar, etc.).
- *  - When [isDarkTheme] is true, also overrides Nextcloud's `--color-*`
- *    CSS custom properties to dark equivalents. This is what actually
- *    paints the editor dark — algorithmic darkening alone is a no-op
- *    against pages that hard-code colours via custom properties, which
- *    Nextcloud does throughout.
+ *  - Adds [editorThemeCss]'s `--color-*` overrides (Theme T4), which is
+ *    what actually paints the editor in the app's colours. Algorithmic
+ *    darkening alone is a no-op against pages that set colours through
+ *    custom properties, which Nextcloud does throughout.
  *  - Installs a MutationObserver on `<body>` so the rules survive
  *    Vue's lazy mounts (Nextcloud assembles the shell in chunks after
  *    `onPageFinished` fires). Idempotent — re-running does nothing if
@@ -679,18 +701,27 @@ private class StripChromeWebViewClient(
  * contracts. If they rename, the rail or theme leak back but the
  * editor itself still works.
  */
-private fun buildInjectionScript(isDarkTheme: Boolean): String {
-    val css = STRIP_CHROME_CSS + if (isDarkTheme) DARK_THEME_CSS else ""
+internal fun buildInjectionScript(themeCss: String): String {
+    val css = STRIP_CHROME_CSS + themeCss
     val escaped = css
         .replace("\\", "\\\\")
         .replace("\n", "\\n")
         .replace("'", "\\'")
+    // Theme T4: the CSS lives on `window` so the MutationObserver installed by
+    // the first injection applies the *current* CSS, and an existing <style>
+    // is updated in place rather than kept, so a later injection (a palette
+    // change) takes effect without a reload.
     return """
         (function() {
             var STYLE_ID = 'nc-collectives-strip';
-            var css = '$escaped';
+            window.__ncCollectivesCss = '$escaped';
             function install() {
-                if (document.getElementById(STYLE_ID)) return;
+                var css = window.__ncCollectivesCss;
+                var existing = document.getElementById(STYLE_ID);
+                if (existing) {
+                    if (existing.textContent !== css) existing.textContent = css;
+                    return;
+                }
                 var head = document.head || document.documentElement;
                 if (!head) return;
                 var s = document.createElement('style');
@@ -729,58 +760,118 @@ body, html, #body-user { padding: 0 !important; margin: 0 !important; min-height
 """
 
 /**
- * Dark-mode override. Nextcloud's stylesheet reads colours from
- * `--color-*` custom properties on `:root`; overriding them once at
- * the document root cascades through every Vue component that uses
- * them, including the Text editor. Values mirror Nextcloud server's
- * own "dark" theme tokens (from `apps/theming/css/default.css`).
- * `color-scheme: dark` flips native form-control widgets so they
- * don't paint white against the dark surface.
+ * Theme T4: the app's colours, as an editor needs them. Built from the
+ * resolved M3 [androidx.compose.material3.ColorScheme], so the editor follows
+ * the app's palette (brand or Material You) and mode.
  */
-private const val DARK_THEME_CSS = """
+internal data class EditorPalette(
+    val isDark: Boolean,
+    val background: Color,
+    val onSurface: Color,
+    val onSurfaceVariant: Color,
+    val surfaceContainer: Color,
+    val surfaceContainerHigh: Color,
+    val surfaceContainerHighest: Color,
+    val outline: Color,
+    val outlineVariant: Color,
+    val primary: Color,
+    val onPrimary: Color,
+    val primaryContainer: Color,
+    val onPrimaryContainer: Color,
+    val error: Color,
+) {
+    companion object {
+        fun from(
+            scheme: androidx.compose.material3.ColorScheme,
+            isDark: Boolean,
+        ) = EditorPalette(
+            isDark = isDark,
+            background = scheme.background,
+            onSurface = scheme.onSurface,
+            onSurfaceVariant = scheme.onSurfaceVariant,
+            surfaceContainer = scheme.surfaceContainer,
+            surfaceContainerHigh = scheme.surfaceContainerHigh,
+            surfaceContainerHighest = scheme.surfaceContainerHighest,
+            outline = scheme.outline,
+            outlineVariant = scheme.outlineVariant,
+            primary = scheme.primary,
+            onPrimary = scheme.onPrimary,
+            primaryContainer = scheme.primaryContainer,
+            onPrimaryContainer = scheme.onPrimaryContainer,
+            error = scheme.error,
+        )
+    }
+}
+
+/**
+ * Theme T4: Nextcloud's `--color-*` tokens, mapped from the app's palette.
+ *
+ * Text reads its colours from these custom properties on `:root`, so setting
+ * them once there cascades through every Vue component. They used to be set
+ * in dark mode only, to hard-coded Nextcloud greys, for a subset of tokens:
+ * whatever the subset missed kept its light value (light patches on a dark
+ * page), and the accent was forced to grey. Light mode set nothing at all, so
+ * a user whose Nextcloud theme is dark got a dark editor inside a light app.
+ * Now both modes set the full set, from the colours the rest of the app is
+ * drawn in. `color-scheme` flips the native form widgets with them.
+ */
+internal fun editorThemeCss(p: EditorPalette): String {
+    val bg = p.background.hex()
+    val text = p.onSurface.hex()
+    return """
 :root, html, body {
-    color-scheme: dark !important;
-    --color-main-background: #171717 !important;
-    --color-main-background-rgb: 23, 23, 23 !important;
-    --color-main-background-translucent: rgba(23, 23, 23, 0.9) !important;
-    --color-background-hover: #2c2c2c !important;
-    --color-background-dark: #2c2c2c !important;
-    --color-background-darker: #232323 !important;
-    --color-main-text: #ebebeb !important;
-    --color-text-lighter: #b0b0b0 !important;
-    --color-text-light: #d0d0d0 !important;
-    --color-text-maxcontrast: #b0b0b0 !important;
-    --color-border: #3a3a3a !important;
-    --color-border-dark: #4a4a4a !important;
-    --color-placeholder-light: #2c2c2c !important;
-    --color-placeholder-dark: #3a3a3a !important;
-    /* Override the user's NC theme accent colour to a contrast-only
-       neutral so any chrome painted in `--color-primary` (the source
-       of the "blue rail") blends into the dark surface instead of
-       cutting through it. */
-    --color-primary: #2c2c2c !important;
-    --color-primary-default: #2c2c2c !important;
-    --color-primary-text: #ebebeb !important;
-    --color-primary-text-dark: #ebebeb !important;
-    --color-primary-element: #2c2c2c !important;
-    --color-primary-element-default: #2c2c2c !important;
-    --color-primary-element-text: #ebebeb !important;
-    --color-primary-light: #2c2c2c !important;
-    --color-primary-light-text: #ebebeb !important;
+    color-scheme: ${if (p.isDark) "dark" else "light"} !important;
+    --color-main-background: $bg !important;
+    --color-main-background-rgb: ${p.background.rgb()} !important;
+    --color-main-background-translucent: rgba(${p.background.rgb()}, 0.9) !important;
+    --color-main-background-blur: rgba(${p.background.rgb()}, 0.7) !important;
+    --color-background-hover: ${p.surfaceContainerHigh.hex()} !important;
+    --color-background-dark: ${p.surfaceContainerHigh.hex()} !important;
+    --color-background-darker: ${p.surfaceContainerHighest.hex()} !important;
+    --color-placeholder-light: ${p.surfaceContainer.hex()} !important;
+    --color-placeholder-dark: ${p.surfaceContainerHigh.hex()} !important;
+    --color-main-text: $text !important;
+    --color-text-light: $text !important;
+    --color-text-lighter: ${p.onSurfaceVariant.hex()} !important;
+    --color-text-maxcontrast: ${p.onSurfaceVariant.hex()} !important;
+    --color-text-maxcontrast-default: ${p.onSurfaceVariant.hex()} !important;
+    --color-border: ${p.outlineVariant.hex()} !important;
+    --color-border-dark: ${p.outline.hex()} !important;
+    --color-border-maxcontrast: ${p.outline.hex()} !important;
+    --color-primary: ${p.primary.hex()} !important;
+    --color-primary-default: ${p.primary.hex()} !important;
+    --color-primary-text: ${p.onPrimary.hex()} !important;
+    --color-primary-element: ${p.primary.hex()} !important;
+    --color-primary-element-default: ${p.primary.hex()} !important;
+    --color-primary-element-hover: ${p.primary.hex()} !important;
+    --color-primary-element-text: ${p.onPrimary.hex()} !important;
+    --color-primary-light: ${p.primaryContainer.hex()} !important;
+    --color-primary-light-text: ${p.onPrimaryContainer.hex()} !important;
+    --color-primary-element-light: ${p.primaryContainer.hex()} !important;
+    --color-primary-element-light-text: ${p.onPrimaryContainer.hex()} !important;
+    --color-error: ${p.error.hex()} !important;
     --image-background: none !important;
     --image-background-default: none !important;
-    background-color: #171717 !important;
+    background-color: $bg !important;
     background-image: none !important;
-    color: #ebebeb !important;
+    color: $text !important;
 }
 .text-editor, .editor, .text-editor__main, .ProseMirror, .ProseMirror * {
     background-color: transparent !important;
-    color: #ebebeb !important;
+    color: $text !important;
 }
 .text-editor__wrapper, .text-editor__content-wrapper {
-    background-color: #171717 !important;
+    background-color: $bg !important;
 }
 """
+}
+
+private fun Color.hex(): String = "#%06X".format(toArgb() and 0xFFFFFF)
+
+private fun Color.rgb(): String {
+    val argb = toArgb()
+    return "${(argb shr 16) and 0xFF}, ${(argb shr 8) and 0xFF}, ${argb and 0xFF}"
+}
 
 /**
  * Surfaces the WebView's "insert image" file-chooser as the system
