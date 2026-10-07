@@ -5,7 +5,7 @@ import android.os.Bundle
 import androidx.activity.ComponentActivity
 import androidx.activity.compose.setContent
 import androidx.activity.enableEdgeToEdge
-import androidx.compose.runtime.getValue
+import androidx.compose.runtime.SideEffect
 import androidx.core.splashscreen.SplashScreen.Companion.installSplashScreen
 import androidx.lifecycle.compose.collectAsStateWithLifecycle
 import com.megamaced.nccollectives.data.prefs.UserPreferences
@@ -25,8 +25,21 @@ class MainActivity : ComponentActivity() {
     @Inject
     lateinit var userPreferences: UserPreferences
 
+    /**
+     * Theme T1: whether the first [UserPrefs] has been read. The splash
+     * screen stays up until it has.
+     */
+    @Volatile
+    private var prefsLoaded = false
+
     override fun onCreate(savedInstanceState: Bundle?) {
-        installSplashScreen()
+        // Theme T1: hold the splash until the preferences are in. The first
+        // frame used to draw with defaults (`initialValue = UserPrefs()`) and
+        // flip once DataStore answered, on every launch and every
+        // recreation. A user on Light with a dark system saw dark, then
+        // light, then dark again on rotation, which reads as the setting not
+        // sticking. The read is one small file, so the hold is short.
+        installSplashScreen().setKeepOnScreenCondition { !prefsLoaded }
         enableEdgeToEdge()
         super.onCreate(savedInstanceState)
         // B-74: only a fresh start may publish. This activity is
@@ -44,9 +57,18 @@ class MainActivity : ComponentActivity() {
             restoreUnfinishedShare(savedInstanceState)
         }
         setContent {
-            val prefs by userPreferences.flow.collectAsStateWithLifecycle(initialValue = UserPrefs())
-            NcCollectivesTheme(themeMode = prefs.themeMode, textScale = prefs.textScale) {
-                NcCollectivesScaffold()
+            val prefs = userPreferences.flow
+                .collectAsStateWithLifecycle(initialValue = null)
+                .value
+            if (prefs != null) {
+                SideEffect { prefsLoaded = true }
+                NcCollectivesTheme(
+                    themeMode = prefs.themeMode,
+                    textScale = prefs.textScale,
+                    dynamicColor = prefs.dynamicColor,
+                ) {
+                    NcCollectivesScaffold()
+                }
             }
         }
     }

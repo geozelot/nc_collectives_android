@@ -23,8 +23,9 @@ fun NcCollectivesTheme(
     // the page renderer and the two editors to read; the M3 typography
     // itself is left alone so chrome keeps its own scale.
     textScale: TextScale = TextScale.Default,
-    // Material You on Android 12+; brand palette otherwise. Callers can
-    // opt out via Settings (forces the brand scheme on all API levels).
+    // Material You on Android 12+; brand palette otherwise. Settings →
+    // Appearance can switch it off (`UserPrefs.dynamicColor`), which forces
+    // the brand scheme on all API levels.
     dynamicColor: Boolean = true,
     content: @Composable () -> Unit,
 ) {

@@ -40,6 +40,7 @@ data class SettingsUiState(
     val activeAccountId: String?,
     val themeMode: ThemeMode,
     val textScale: TextScale,
+    val dynamicColor: Boolean,
     val syncCadence: SyncCadence,
     val editorPreference: EditorPreference,
     /** Cached, non-trashed collectives offered as startup destinations. */
@@ -142,6 +143,7 @@ class SettingsViewModel
                     activeAccountId = null,
                     themeMode = ThemeMode.System,
                     textScale = TextScale.Default,
+                    dynamicColor = true,
                     syncCadence = SyncCadence.SixHourly,
                     editorPreference = EditorPreference.PreferPlain,
                     collectives = emptyList(),
@@ -155,6 +157,10 @@ class SettingsViewModel
 
         fun setTextScale(scale: TextScale) {
             viewModelScope.launch { userPreferences.setTextScale(scale) }
+        }
+
+        fun setDynamicColor(enabled: Boolean) {
+            viewModelScope.launch { userPreferences.setDynamicColor(enabled) }
         }
 
         fun setSyncCadence(cadence: SyncCadence) {
@@ -279,6 +285,7 @@ class SettingsViewModel
                 activeAccountId = activeAccountId,
                 themeMode = prefs.themeMode,
                 textScale = prefs.textScale,
+                dynamicColor = prefs.dynamicColor,
                 syncCadence = prefs.syncCadence,
                 editorPreference = prefs.editorPreference,
                 collectives = collectives,

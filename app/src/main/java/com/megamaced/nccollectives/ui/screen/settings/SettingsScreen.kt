@@ -1,6 +1,7 @@
 package com.megamaced.nccollectives.ui.screen.settings
 
 import android.net.Uri
+import android.os.Build
 import androidx.browser.customtabs.CustomTabsIntent
 import androidx.compose.foundation.clickable
 import androidx.compose.foundation.layout.Arrangement
@@ -15,6 +16,7 @@ import androidx.compose.foundation.layout.padding
 import androidx.compose.foundation.layout.size
 import androidx.compose.foundation.rememberScrollState
 import androidx.compose.foundation.selection.selectable
+import androidx.compose.foundation.selection.toggleable
 import androidx.compose.foundation.verticalScroll
 import androidx.compose.material.icons.Icons
 import androidx.compose.material.icons.automirrored.filled.ArrowBack
@@ -35,6 +37,7 @@ import androidx.compose.material3.RadioButton
 import androidx.compose.material3.Scaffold
 import androidx.compose.material3.SnackbarHost
 import androidx.compose.material3.SnackbarHostState
+import androidx.compose.material3.Switch
 import androidx.compose.material3.Text
 import androidx.compose.material3.TextButton
 import androidx.compose.material3.TopAppBar
@@ -210,6 +213,11 @@ internal fun SettingsScreen(
                 selected = ui.themeMode,
                 onSelect = viewModel::setThemeMode,
             )
+            // Theme T1: Material You exists from Android 12; below it the
+            // app's own palette is the only one, so there is nothing to choose.
+            if (Build.VERSION.SDK_INT >= Build.VERSION_CODES.S) {
+                DynamicColorRow(checked = ui.dynamicColor, onCheckedChange = viewModel::setDynamicColor)
+            }
 
             Text(
                 "Text size applies to page content and both editors. It multiplies " +
@@ -472,6 +480,30 @@ private fun SectionHeader(label: String) {
         color = MaterialTheme.colorScheme.primary,
         modifier = Modifier.semantics { heading() },
     )
+}
+
+@Composable
+private fun DynamicColorRow(
+    checked: Boolean,
+    onCheckedChange: (Boolean) -> Unit,
+) {
+    Row(
+        modifier = Modifier
+            .fillMaxWidth()
+            .toggleable(value = checked, role = Role.Switch, onValueChange = onCheckedChange)
+            .padding(vertical = 8.dp),
+        verticalAlignment = Alignment.CenterVertically,
+    ) {
+        Column(modifier = Modifier.weight(1f)) {
+            Text("Colours from your wallpaper", style = MaterialTheme.typography.bodyLarge)
+            Text(
+                "Material You. Off keeps the app's own colours, whatever the wallpaper or system theme.",
+                style = MaterialTheme.typography.bodySmall,
+                color = MaterialTheme.colorScheme.onSurfaceVariant,
+            )
+        }
+        Switch(checked = checked, onCheckedChange = null)
+    }
 }
 
 @Composable
