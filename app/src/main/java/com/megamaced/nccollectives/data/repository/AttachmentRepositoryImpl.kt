@@ -219,9 +219,17 @@ class AttachmentRepositoryImpl
                 // worker can find/delete it without an extra Room read.
                 val staged = File(dir, AttachmentEntity.key(pageId, resolvedName).replace('/', '_'))
                 try {
-                    context.contentResolver.openInputStream(sourceUri)?.use { input ->
-                        staged.outputStream().use { output -> input.copyTo(output) }
+                    val copied = context.contentResolver.openInputStream(sourceUri)?.use { input ->
+                        staged.outputStream().use { output -> copyAtMost(input, output, MAX_STAGED_BYTES) }
                     } ?: return@withContext null
+                    // S-31: a source with no end (a provider streaming
+                    // forever) or a huge one filled the cache it was being
+                    // copied into, with nothing to stop it.
+                    if (copied == null) {
+                        Timber.w("Refusing to stage %s: larger than %d bytes", sourceUri, MAX_STAGED_BYTES)
+                        staged.delete()
+                        return@withContext null
+                    }
                     staged
                 } catch (e: SecurityException) {
                     Timber.w(e, "Source URI %s not readable for staging", sourceUri)
@@ -229,6 +237,11 @@ class AttachmentRepositoryImpl
                     null
                 } catch (e: java.io.IOException) {
                     Timber.w(e, "Failed to stage %s", sourceUri)
+                    staged.delete()
+                    null
+                } catch (e: RuntimeException) {
+                    // S-31: anything else a sender's provider throws.
+                    Timber.w(e, "Provider failed while staging %s", sourceUri)
                     staged.delete()
                     null
                 }
@@ -848,3 +861,30 @@ internal fun deleteRoute(existing: AttachmentEntity?): DeleteRoute =
         existing.status == AttachmentEntity.STATUS_REMOTE -> DeleteRoute.ServerById
         else -> DeleteRoute.Tombstone
     }
+
+/**
+ * S-31: the largest attachment the app stages for upload. Well above any photo
+ * or document a phone shares, and well below what an unchecked copy into the
+ * cache directory could otherwise take.
+ */
+internal const val MAX_STAGED_BYTES = 512L * 1024 * 1024
+
+/**
+ * Copy [input] into [output], or stop once more than [limit] bytes have come
+ * through. Returns the bytes copied, or null when the limit was passed.
+ */
+internal fun copyAtMost(
+    input: java.io.InputStream,
+    output: java.io.OutputStream,
+    limit: Long,
+): Long? {
+    val buffer = ByteArray(DEFAULT_BUFFER_SIZE)
+    var total = 0L
+    while (true) {
+        val read = input.read(buffer)
+        if (read < 0) return total
+        total += read
+        if (total > limit) return null
+        output.write(buffer, 0, read)
+    }
+}

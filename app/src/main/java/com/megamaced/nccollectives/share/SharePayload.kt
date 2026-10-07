@@ -38,6 +38,23 @@ data class SharePayload(
     val isEmpty: Boolean get() = text.isNullOrBlank() && images.isEmpty()
 
     /**
+     * S-31: this payload without any URI one of this app's own providers
+     * serves, or null when nothing else is left.
+     *
+     * S-11 keeps `file://` out, but a `content://` URI of this app's own
+     * FileProvider passed the check. An app with no access to our cache
+     * could share `content://<us>.fileprovider/captures/<name>` at the
+     * exported share activity. We would read our own private file with our
+     * own permission, upload it into the user's Nextcloud, and then delete
+     * the source as a finished camera capture (`deleteIfOwnFileProvider`).
+     * Every provider authority this app declares starts with its package
+     * name. An authority from anyone else that happens to share the prefix
+     * is refused too, which costs nothing.
+     */
+    fun foreignOnly(ownPackage: String): SharePayload? =
+        copy(images = images.filterNot { it.authority.isOwnAuthority(ownPackage) }).takeUnless { it.isEmpty }
+
+    /**
      * Save this payload into an Activity's saved instance state so it can
      * outlive the process — issue #42.
      *
@@ -47,6 +64,12 @@ data class SharePayload(
      * deserialises to.
      */
     fun writeTo(state: Bundle) {
+        // S-31: a saved-state bundle crosses Binder, which refuses a
+        // transaction over about 1 MB. A share of a long article put its
+        // whole text here, and every backgrounding then threw
+        // TransactionTooLargeException. Such a share survives as long as the
+        // process does, and isn't carried across process death.
+        if ((text?.length ?: 0) > MAX_SAVED_TEXT_CHARS) return
         state.putString(KEY_ID, id)
         state.putString(KEY_SUBJECT, subject)
         state.putString(KEY_TEXT, text)
@@ -142,3 +165,8 @@ data class SharePayload(
             }
     }
 }
+
+private fun String?.isOwnAuthority(ownPackage: String): Boolean = this != null && (this == ownPackage || startsWith("$ownPackage."))
+
+/** S-31: well inside Binder's ~1 MB transaction limit, which a bundle shares with everything else. */
+internal const val MAX_SAVED_TEXT_CHARS = 100_000

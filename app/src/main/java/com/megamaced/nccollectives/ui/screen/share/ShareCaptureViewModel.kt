@@ -375,7 +375,15 @@ class ShareCaptureViewModel
             val names = mutableListOf<String>()
             var dropped = 0
             for (uri in payload.images) {
-                val type = context.contentResolver.getType(uri)
+                // S-31: the sender's provider may throw from getType. Such
+                // an image is dropped, and the report says so.
+                val type = try {
+                    context.contentResolver.getType(uri)
+                } catch (e: RuntimeException) {
+                    Timber.w(e, "Provider refused getType for %s", uri)
+                    dropped++
+                    continue
+                }
                 // S-5: refuse non-image Uris. The manifest only declares
                 // image/* + text/plain intent filters, so the OS routes
                 // matching senders only — but a malicious app can still
