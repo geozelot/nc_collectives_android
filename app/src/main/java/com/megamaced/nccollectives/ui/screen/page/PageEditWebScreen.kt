@@ -253,6 +253,8 @@ internal fun PageEditWebScreen(
                                 "Couldn't verify the server's TLS certificate. The editor was not opened.",
                             )
                         },
+                        claimUrl = viewModel::claimUrl,
+                        onUrlSpent = viewModel::onUrlSpent,
                         onWebViewCreated = { webView = it },
                         // Identity-checked rather than an unconditional
                         // `webView = null`: Compose gives no ordering
@@ -316,6 +318,8 @@ private fun EditorWebView(
     onCloseFromJs: () -> Unit,
     onReloadFromJs: () -> Unit,
     onSslError: () -> Unit,
+    claimUrl: (String) -> Boolean,
+    onUrlSpent: () -> Unit,
     onWebViewCreated: (WebView) -> Unit,
     onWebViewReleased: (WebView) -> Unit,
 ) {
@@ -484,7 +488,11 @@ private fun EditorWebView(
                         Timber.tag(TAG).d("Clearing WebView HTTP cache after server version change")
                         clearCache(true)
                     }
-                    loadUrl(url)
+                    // H6: a WebView rebuilt after an Activity recreation
+                    // finds its URL already spent by the one before it.
+                    // Loading it again shows an error page, or Nextcloud's
+                    // login form, so ask for a fresh session instead.
+                    if (claimUrl(url)) loadUrl(url) else onUrlSpent()
                     onWebViewCreated(this)
                 }
             },

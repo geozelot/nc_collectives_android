@@ -29,9 +29,19 @@
         android:theme="@style/Theme.NcCollectives"
         tools:targetApi="36">
 
+        <!--
+            H6: rotation, a window resize (multi-window, foldables) and a
+            hardware keyboard no longer recreate the activity. The UI is all
+            Compose and recomposes for the new configuration, and recreation
+            took the collaborative editor's WebView with it, mid-session.
+            uiMode is deliberately left out: the window theme and the system
+            bar styling are only applied at creation, so a dark-mode flip still
+            needs a recreation until they follow the theme by themselves.
+        -->
         <activity
             android:name=".MainActivity"
             android:exported="true"
+            android:configChanges="orientation|screenSize|screenLayout|smallestScreenSize|keyboard|keyboardHidden"
             android:launchMode="singleTask"
             android:theme="@style/Theme.NcCollectives.Splash"
             android:windowSoftInputMode="adjustResize">
