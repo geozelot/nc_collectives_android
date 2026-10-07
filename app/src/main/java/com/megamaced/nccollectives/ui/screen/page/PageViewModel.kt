@@ -130,6 +130,24 @@ class PageViewModel
             .distinctUntilChanged()
             .stateIn(viewModelScope, SharingStarted.WhileSubscribed(STOP_TIMEOUT_MS), 0)
 
+        /**
+         * U15: unsynced work on this page that trashing it would delete. The
+         * trash cascades the queued edit, the conflict draft and any upload
+         * still waiting, and restoring the page from the trash brings none of
+         * them back, so the confirmation has to say so.
+         */
+        val unsyncedWorkCount: StateFlow<Int> = combine(
+            page,
+            pageRepository.observeHasQueuedEdit(pageId),
+            attachmentRepository.observeForPage(pageId),
+        ) { p, queued, attachments ->
+            unsyncedWorkCount(
+                hasQueuedEdit = queued,
+                hasDraft = p?.draftBodyMd != null,
+                attachmentStatuses = attachments.map { it.status },
+            )
+        }.stateIn(viewModelScope, SharingStarted.WhileSubscribed(STOP_TIMEOUT_MS), 0)
+
         val isFavorite: StateFlow<Boolean> = combine(
             page,
             collectiveRepository.observeCollectives(),
@@ -600,5 +618,33 @@ class PageViewModel
              * which is the canonical Nextcloud brand blue.
              */
             const val NEW_TAG_COLOUR = "0082c9"
+        }
+    }
+
+/** U15: how many pieces of work trashing a page would lose. */
+internal fun unsyncedWorkCount(
+    hasQueuedEdit: Boolean,
+    hasDraft: Boolean,
+    attachmentStatuses: List<Attachment.Status>,
+): Int =
+    (if (hasQueuedEdit) 1 else 0) +
+        (if (hasDraft) 1 else 0) +
+        attachmentStatuses.count { it != Attachment.Status.REMOTE }
+
+/** U15: the line the trash confirmation adds, or null when nothing would be lost. */
+internal fun trashLossWarning(unsynced: Int): String? =
+    when {
+        unsynced <= 0 -> {
+            null
+        }
+
+        unsynced == 1 -> {
+            "It has 1 change on this device that hasn't reached the server. " +
+                "Trashing deletes it, and restoring the page won't bring it back."
+        }
+
+        else -> {
+            "It has $unsynced changes on this device that haven't reached the server. " +
+                "Trashing deletes them, and restoring the page won't bring them back."
         }
     }

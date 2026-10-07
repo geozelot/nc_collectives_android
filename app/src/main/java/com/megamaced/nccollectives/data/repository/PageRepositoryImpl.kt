@@ -79,6 +79,9 @@ class PageRepositoryImpl
                 .distinctUntilChanged()
                 .map { rows -> rows.map { it.toDomain() } }
 
+        override fun observeHasQueuedEdit(pageId: Long): Flow<Boolean> =
+            editQueueDao.observePendingBody(pageId).map { it != null }.distinctUntilChanged()
+
         override fun observePages(collectiveId: Long): Flow<List<Page>> =
             pageDao
                 .observeDetailForCollective(collectiveId)
