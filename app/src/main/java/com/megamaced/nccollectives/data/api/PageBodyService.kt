@@ -14,10 +14,42 @@ import okhttp3.OkHttpClient
 import okhttp3.Request
 import okhttp3.RequestBody
 import okhttp3.RequestBody.Companion.toRequestBody
+import okio.BufferedSource
+import okio.buffer
+import okio.source
 import timber.log.Timber
+import java.io.InputStream
 import javax.inject.Inject
 import javax.inject.Singleton
 import kotlin.coroutines.resumeWithException
+
+/**
+ * What [PageBodyService.compareRemoteFile] found at a name: whether the
+ * object there holds exactly the local bytes, and its ETag when it does.
+ */
+data class RemoteFileMatch(
+    val identical: Boolean,
+    val etag: String?,
+)
+
+/**
+ * Whether [a] and [b] yield the same bytes, read to the end of both.
+ *
+ * Compares whatever both have buffered at a time, so memory stays at Okio's
+ * segment size however long the input.
+ */
+internal fun sameBytes(
+    a: BufferedSource,
+    b: BufferedSource,
+): Boolean {
+    while (true) {
+        val aHasMore = a.request(1)
+        val bHasMore = b.request(1)
+        if (!aHasMore || !bHasMore) return aHasMore == bHasMore
+        val n = minOf(a.buffer.size, b.buffer.size)
+        if (a.readByteString(n) != b.readByteString(n)) return false
+    }
+}
 
 /** A page body along with the WebDAV ETag the server returned for it. */
 data class PageBody(
@@ -189,6 +221,49 @@ class PageBodyService
                 .put(body)
                 .build()
             return webDavCall(request) { response -> normaliseEtag(response.header("ETag")) }
+        }
+
+        /**
+         * Whether the file at `(collectivePath, filePath, fileName)` holds
+         * exactly the bytes [openLocal] yields, and its ETag when it does.
+         *
+         * D1b: [uploadFile]'s `If-None-Match: *` refuses an upload's own
+         * earlier attempt as readily as another client's file. A PUT can
+         * land with its response lost — a read timeout, the worker
+         * cancelled mid-call — and the retry then 412s against bytes this
+         * device put there. Only the bytes tell the two apart.
+         *
+         * A length the server states up front settles a mismatch without
+         * reading the body; otherwise both sides are streamed and compared
+         * as they arrive, so neither is held whole in memory. `404` is "not
+         * identical": nothing is there to be ours.
+         */
+        suspend fun compareRemoteFile(
+            collectivePath: String,
+            filePath: String,
+            fileName: String,
+            localLength: Long,
+            openLocal: () -> InputStream?,
+        ): ApiResult<RemoteFileMatch> {
+            val url = buildWebDavUrl(collectivePath, filePath, fileName) ?: return unbuildableUrl()
+            val request = Request
+                .Builder()
+                .url(url)
+                .get()
+                .build()
+            return webDavCall(request, extraSuccessCodes = setOf(404)) { response ->
+                val remoteLength = response.body.contentLength()
+                val lengthsDiffer = remoteLength >= 0 && localLength >= 0 && remoteLength != localLength
+                if (response.code == 404 || lengthsDiffer) {
+                    return@webDavCall RemoteFileMatch(identical = false, etag = null)
+                }
+                val local = checkNotNull(openLocal()) { "Local bytes for the comparison are unreadable" }
+                val identical = local.source().buffer().use { sameBytes(response.body.source(), it) }
+                RemoteFileMatch(
+                    identical = identical,
+                    etag = if (identical) normaliseEtag(response.header("ETag")) else null,
+                )
+            }
         }
 
         /**

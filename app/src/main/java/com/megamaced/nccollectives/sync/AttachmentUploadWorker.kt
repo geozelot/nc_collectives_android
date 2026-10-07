@@ -164,12 +164,20 @@ class AttachmentUploadWorker
                         continue
                     }
 
-                    val put = bodyService.uploadFile(
-                        collectivePath = page.collectivePath,
-                        filePath = AttachmentRepositoryImpl.combinePath(page.filePath, dir),
-                        fileName = row.fileName,
-                        body = body,
-                    )
+                    val attachmentsPath = AttachmentRepositoryImpl.combinePath(page.filePath, dir)
+                    val put = bodyService
+                        .uploadFile(
+                            collectivePath = page.collectivePath,
+                            filePath = attachmentsPath,
+                            fileName = row.fileName,
+                            body = body,
+                        ).let { result ->
+                            if (result != ApiResult.Conflict) {
+                                result
+                            } else {
+                                recheckRefusedUpload(page.collectivePath, attachmentsPath, row.fileName, uri)
+                            }
+                        }
                     when (put) {
                         is ApiResult.Success -> {
                             if (!accountGeneration.isCurrent(generation)) {
@@ -347,6 +355,65 @@ class AttachmentUploadWorker
                 val resolver: ContentResolver = appContext.contentResolver
                 resolver.openAssetFileDescriptor(uri, "r").use { afd -> afd?.length ?: -1L }
             }.getOrDefault(-1L)
+
+        /**
+         * Re-reads a 412 to an upload's `If-None-Match: *` (D1b).
+         *
+         * The name can be taken by this upload's own earlier attempt: a PUT
+         * that landed while its response was lost. Renaming that put a
+         * second copy beside the first and repointed the page body at it.
+         *
+         * Success with the server's ETag when the object there is exactly
+         * the staged bytes, so the success arm records it as this upload.
+         * [ApiResult.Conflict] when it isn't, so the rename runs as before.
+         * Whatever stopped the comparison finishing comes back as itself and
+         * is settled like a failed PUT, under the same name: on a doubt, a
+         * rename is the outcome that moves the page's reference.
+         */
+        private suspend fun recheckRefusedUpload(
+            collectivePath: String,
+            filePath: String,
+            fileName: String,
+            uri: Uri,
+        ): ApiResult<String?> {
+            val compared = bodyService.compareRemoteFile(
+                collectivePath = collectivePath,
+                filePath = filePath,
+                fileName = fileName,
+                localLength = sizeOf(uri),
+                openLocal = { appContext.contentResolver.openInputStream(uri) },
+            )
+            return when (compared) {
+                is ApiResult.Success -> {
+                    if (compared.data.identical) {
+                        Timber.i("Upload %s had already landed; recording it", fileName)
+                        ApiResult.Success(compared.data.etag)
+                    } else {
+                        ApiResult.Conflict
+                    }
+                }
+
+                is ApiResult.HttpError -> {
+                    compared
+                }
+
+                is ApiResult.NetworkError -> {
+                    compared
+                }
+
+                is ApiResult.Unexpected -> {
+                    compared
+                }
+
+                ApiResult.Unauthorised -> {
+                    ApiResult.Unauthorised
+                }
+
+                ApiResult.Conflict -> {
+                    ApiResult.Conflict
+                }
+            }
+        }
 
         /**
          * Mark one row's failure, and say whether the drain should ask for
