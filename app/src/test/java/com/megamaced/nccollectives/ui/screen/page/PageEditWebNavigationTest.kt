@@ -150,4 +150,74 @@ class PageEditWebNavigationTest {
         assertTrue("data: never leaves the device", subresourceAllowed("data", null, "cloud.example.com"))
         assertTrue(subresourceAllowed("blob", null, "cloud.example.com"))
     }
+
+    @Test
+    fun theLoginPageOnTheServer_endsTheSession() {
+        // S11: shown inside the editor, Nextcloud's login form would have
+        // the user type their account password into a WebView the app
+        // injects script into.
+        listOf("/login", "/index.php/login", "/login/challenge/totp", "/index.php/login/v2/flow").forEach { path ->
+            assertEquals(
+                path,
+                NavigationDecision.SessionExpired,
+                decideNavigation(host, "https", host, isForMainFrame = true, hasGesture = false, targetPath = path),
+            )
+        }
+    }
+
+    @Test
+    fun theLoginPageInASubframe_endsTheSessionToo() {
+        assertEquals(
+            NavigationDecision.SessionExpired,
+            decideNavigation(host, "https", host, isForMainFrame = false, hasGesture = false, targetPath = "/login"),
+        )
+    }
+
+    @Test
+    fun theLoginPageUnderTheServersBasePath_endsTheSession() {
+        assertEquals(
+            NavigationDecision.SessionExpired,
+            decideNavigation(
+                host,
+                "https",
+                host,
+                isForMainFrame = true,
+                hasGesture = false,
+                targetPath = "/nextcloud/index.php/login",
+                allowedBasePath = "/nextcloud",
+            ),
+        )
+    }
+
+    @Test
+    fun pathsThatOnlyLookLikeLogin_stayInTheEditor() {
+        listOf("/loginx", "/apps/text/login", "/index.php/apps/login", "/").forEach { path ->
+            assertEquals(
+                path,
+                NavigationDecision.KeepInWebView,
+                decideNavigation(host, "https", host, isForMainFrame = true, hasGesture = false, targetPath = path),
+            )
+        }
+        // Outside the server's base path it isn't this server's login page.
+        assertEquals(
+            NavigationDecision.KeepInWebView,
+            decideNavigation(
+                host,
+                "https",
+                host,
+                isForMainFrame = true,
+                hasGesture = false,
+                targetPath = "/login",
+                allowedBasePath = "/nextcloud",
+            ),
+        )
+    }
+
+    @Test
+    fun aLoginPageOnAnotherHost_isRoutedLikeAnyOtherLink() {
+        assertEquals(
+            NavigationDecision.RouteToSystem,
+            decideNavigation("example.org", "https", host, isForMainFrame = true, hasGesture = true, targetPath = "/login"),
+        )
+    }
 }

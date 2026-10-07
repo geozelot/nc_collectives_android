@@ -17,6 +17,7 @@ import kotlinx.coroutines.flow.StateFlow
 import kotlinx.coroutines.flow.asStateFlow
 import kotlinx.coroutines.flow.update
 import kotlinx.coroutines.launch
+import okhttp3.HttpUrl.Companion.toHttpUrlOrNull
 import javax.inject.Inject
 
 /**
@@ -101,6 +102,24 @@ class PageEditWebViewModel
          * accepted.
          */
         val allowedHost: String? = tokenStore.getCredentials()?.host?.let(::serverHostOf)
+
+        /**
+         * S11: the path the server is installed under — empty at the root,
+         * `/nextcloud` in a subdirectory — from the same stored credential
+         * as [allowedHost]. The editor needs it to recognise the server's
+         * login page.
+         */
+        val serverBasePath: String =
+            tokenStore
+                .getCredentials()
+                ?.host
+                ?.toHttpUrlOrNull()
+                ?.encodedPath
+                ?.trimEnd('/')
+                .orEmpty()
+
+        /** S11: a session expired since the editor was last ready. */
+        private var expiredBeforeReady = false
 
         init {
             requestSession()
@@ -200,8 +219,29 @@ class PageEditWebViewModel
             requestSession()
         }
 
+        /**
+         * S11: the editor's session landed on Nextcloud's login page —
+         * expired, or never valid. The WebView client has already refused to
+         * show the page, which would have had the user type their account
+         * password into a WebView the app injects script into; ask for a
+         * fresh session instead. Once: a second expiry before the editor
+         * comes up means fresh sessions end there too, and asking again
+         * would loop.
+         */
+        fun onSessionExpired() {
+            if (expiredBeforeReady) {
+                _uiState.value = PageEditWebUiState.Failed(
+                    "The editing session ended and a new one couldn't be started. Close the editor and try again.",
+                )
+                return
+            }
+            expiredBeforeReady = true
+            requestSession()
+        }
+
         /** Called by the JS bridge once the editor JS has finished bootstrap. */
         fun onEditorReady() {
+            expiredBeforeReady = false
             _uiState.update { state ->
                 when (state) {
                     is PageEditWebUiState.Loaded -> PageEditWebUiState.Interactive(state.url)
