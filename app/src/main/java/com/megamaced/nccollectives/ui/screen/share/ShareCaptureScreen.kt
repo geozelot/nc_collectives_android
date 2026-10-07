@@ -1,5 +1,6 @@
 package com.megamaced.nccollectives.ui.screen.share
 
+import androidx.activity.compose.BackHandler
 import androidx.compose.foundation.background
 import androidx.compose.foundation.layout.Arrangement
 import androidx.compose.foundation.layout.Box
@@ -79,6 +80,14 @@ internal fun ShareCaptureScreen(
         if (ui.finished) onDismiss()
     }
 
+    // U1: backing out consumes the share, or it comes back on the next
+    // rotation or process restore.
+    val cancel: () -> Unit = {
+        viewModel.cancel()
+        onDismiss()
+    }
+    BackHandler(onBack = cancel)
+
     Scaffold(
         modifier = Modifier.padding(innerPadding),
         containerColor = Color.Transparent,
@@ -86,7 +95,7 @@ internal fun ShareCaptureScreen(
             TopAppBar(
                 title = { Text("Share to collective", style = MaterialTheme.typography.titleMedium) },
                 navigationIcon = {
-                    IconButton(onClick = onDismiss) {
+                    IconButton(onClick = cancel) {
                         Icon(Icons.AutoMirrored.Filled.ArrowBack, contentDescription = "Cancel")
                     }
                 },
