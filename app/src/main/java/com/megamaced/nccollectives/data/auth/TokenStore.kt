@@ -8,7 +8,6 @@ import dagger.hilt.android.qualifiers.ApplicationContext
 import kotlinx.serialization.Serializable
 import kotlinx.serialization.json.Json
 import timber.log.Timber
-import java.io.File
 import javax.inject.Inject
 import javax.inject.Singleton
 
@@ -94,10 +93,16 @@ private data class AccountStore(
  */
 @Singleton
 class TokenStore
-    @Inject
-    constructor(
-        @ApplicationContext private val context: Context,
+    internal constructor(
+        private val context: Context,
+        private val openEncryptedPrefs: (Context) -> SharedPreferences,
+        private val sleep: (Long) -> Unit,
     ) {
+        @Inject
+        constructor(
+            @ApplicationContext context: Context,
+        ) : this(context, ::createEncryptedPrefs, Thread::sleep)
+
         // Cached on first successful open. `null` means either not-yet-opened
         // or open-failed (in which case [openPrefs] will retry next call).
         @Volatile
@@ -132,47 +137,50 @@ class TokenStore
         private val json = Json { ignoreUnknownKeys = true }
 
         /**
-         * Open or reopen the encrypted prefs. On `AEADBadTagException`/
-         * `KeyStoreException`/`SecurityException` — typically caused by a
-         * Keystore reset (factory restore, OEM wipe) or a corrupted Tink
-         * keyset on disk — the prefs file is deleted and a fresh empty
-         * store is created. The user is treated as unauthenticated, which
-         * routes back to the login flow naturally on the next session
-         * refresh. Previously this method propagated and crashed the app
-         * on launch from `SessionManager.init` (S-19).
+         * Open or reopen the encrypted prefs, or null when they won't open.
+         * Never throws: an exception from here used to crash the app on
+         * launch from `SessionManager.init` (S-19).
+         *
+         * S4: a failure is retried after [OPEN_RETRY_DELAYS_MS], and the
+         * file is left alone when every attempt fails. Some OEM Keystores
+         * fail transiently, and this used to delete every account's
+         * credential on the first exception — from a read. Nothing is
+         * memoised from a failure, so the next call tries again. The one
+         * caller allowed to give up on the file is a sign-in, in
+         * [upsertAndActivate].
          */
         private fun openPrefs(): SharedPreferences? {
             prefs?.let { return it }
-            return try {
-                val masterKey = MasterKey
-                    .Builder(context)
-                    .setKeyScheme(MasterKey.KeyScheme.AES256_GCM)
-                    .build()
-                EncryptedSharedPreferences
-                    .create(
-                        context,
-                        PREFS_FILE,
-                        masterKey,
-                        EncryptedSharedPreferences.PrefKeyEncryptionScheme.AES256_SIV,
-                        EncryptedSharedPreferences.PrefValueEncryptionScheme.AES256_GCM,
-                    ).also { prefs = it }
-            } catch (e: Exception) {
-                // Catch broad: Tink wraps a wide cone of failures and the
-                // recovery is always the same — wipe + start over.
-                Timber.w(e, "Encrypted prefs unreadable; wiping and re-creating")
-                // R-42: the file we just wiped is the only source of truth
-                // for the cache, so anything memoised from it is now stale.
-                cached = null
-                resetPrefsFile()
-                null
+            var failure: Exception? = null
+            for (delayMs in listOf(0L) + OPEN_RETRY_DELAYS_MS) {
+                if (delayMs > 0) sleep(delayMs)
+                try {
+                    return openEncryptedPrefs(context).also { prefs = it }
+                } catch (e: Exception) {
+                    // Catch broad: Tink wraps a wide cone of failures.
+                    failure = e
+                }
             }
+            Timber.w(failure, "Encrypted prefs won't open; signed out until they do")
+            return null
         }
 
-        private fun resetPrefsFile() {
-            try {
-                File(context.filesDir.parentFile, "shared_prefs/$PREFS_FILE.xml").delete()
-            } catch (e: SecurityException) {
-                Timber.w(e, "Couldn't delete corrupted prefs file")
+        /**
+         * Delete the store — the credentials and the Tink keysets they're
+         * encrypted under — and drop every handle on it. Call with
+         * [storeLock] held.
+         *
+         * `deleteSharedPreferences` rather than deleting the file: the
+         * platform keeps a process-wide in-memory copy of every prefs file it
+         * has loaded, and only this evicts it. Deleting the file alone left
+         * that copy to be handed back by the next open, undecryptable keyset
+         * and all, and written back to disk by the next edit.
+         */
+        private fun deletePrefsLocked() {
+            prefs = null
+            cached = null
+            if (!context.deleteSharedPreferences(PREFS_FILE)) {
+                Timber.w("Couldn't delete the credential store")
             }
         }
 
@@ -217,6 +225,15 @@ class TokenStore
             val id = accountIdOf(host, loginName)
             val entry = PersistedAccount(id = id, host = host, loginName = loginName, appPassword = appPassword)
             synchronized(storeLock) {
+                // A sign-in has to persist. When the store still won't open
+                // after `openPrefs`'s retries, whatever it holds is out of
+                // reach, and a fresh store is the only way to keep this
+                // credential — the S-19 recovery, which S4 moved here from
+                // every read.
+                if (openPrefs() == null) {
+                    Timber.w("Starting a fresh credential store for this sign-in")
+                    deletePrefsLocked()
+                }
                 val current = readLocked()
                 val accounts = current.accounts.filterNot { it.id == id } + entry
                 writeLocked(AccountStore(accounts = accounts, activeId = id))
@@ -257,12 +274,18 @@ class TokenStore
                 nextActive
             }
 
-        /** Forget every account. The full sign-out path. */
+        /**
+         * Forget every account. The full sign-out path.
+         *
+         * S4: deletes the file, rather than clearing its keys with
+         * `apply()` — which returned before anything reached the disk, so a
+         * process death right after sign-out could leave the credential
+         * there. The delete is done when this returns, takes the keysets
+         * with it, and needs no working Keystore.
+         */
         fun clear() {
             synchronized(storeLock) {
-                cached = null
-                val store = openPrefs() ?: return
-                store.edit().clear().apply()
+                deletePrefsLocked()
                 cached = AccountStore()
             }
         }
@@ -288,10 +311,9 @@ class TokenStore
                 }
                 parsed.also { cached = it }
             } catch (e: Exception) {
-                Timber.w(e, "Reading credentials failed; resetting store")
-                prefs = null
-                cached = null
-                resetPrefsFile()
+                // S4: signed out, but not deleted — a read is no reason to
+                // destroy anything. The next sign-in overwrites the blob.
+                Timber.w(e, "Reading credentials failed; signed out until the next sign-in")
                 AccountStore()
             }
         }
@@ -321,27 +343,39 @@ class TokenStore
             return migrated
         }
 
-        /** Persist [store] and republish the cache. Call with [storeLock] held. */
+        /**
+         * Persist [store] and republish the cache. Call with [storeLock] held.
+         *
+         * `commit()`, so a credential that was just removed is off the disk
+         * when the caller moves on, and so no queued write is left behind to
+         * recreate the file after [clear] deletes it.
+         */
         private fun writeLocked(store: AccountStore) {
             // Drop first: if the write below can't open the prefs, the cache
             // must not keep serving what we failed to persist.
             cached = null
             val prefsFile = openPrefs() ?: return
-            prefsFile
+            val written = prefsFile
                 .edit()
                 .putString(KEY_ACCOUNTS, json.encodeToString(store))
                 .remove(LEGACY_KEY_HOST)
                 .remove(LEGACY_KEY_LOGIN_NAME)
                 .remove(LEGACY_KEY_APP_PASSWORD)
-                .apply()
+                .commit()
+            if (!written) Timber.w("Credential store write didn't reach the disk")
             cached = store
         }
 
         companion object {
             // Filename mirrors the entry in backup_rules.xml that excludes
             // this file from cloud backup / device transfer.
-            private const val PREFS_FILE = "nc_collectives_secure_prefs"
+            internal const val PREFS_FILE = "nc_collectives_secure_prefs"
             private const val KEY_ACCOUNTS = "accounts"
+
+            // Second and third tries at opening the store. Short, because a
+            // read that waits for them can be on the main thread
+            // (`SessionManager.init`); they only run when the Keystore fails.
+            private val OPEN_RETRY_DELAYS_MS = listOf(50L, 200L)
 
             // Pre-multi-account keys. Read once by `migrateSingleAccountLocked`
             // and removed by the write that follows; kept named here so the
@@ -351,3 +385,17 @@ class TokenStore
             private const val LEGACY_KEY_APP_PASSWORD = "app_password"
         }
     }
+
+private fun createEncryptedPrefs(context: Context): SharedPreferences {
+    val masterKey = MasterKey
+        .Builder(context)
+        .setKeyScheme(MasterKey.KeyScheme.AES256_GCM)
+        .build()
+    return EncryptedSharedPreferences.create(
+        context,
+        TokenStore.PREFS_FILE,
+        masterKey,
+        EncryptedSharedPreferences.PrefKeyEncryptionScheme.AES256_SIV,
+        EncryptedSharedPreferences.PrefValueEncryptionScheme.AES256_GCM,
+    )
+}
