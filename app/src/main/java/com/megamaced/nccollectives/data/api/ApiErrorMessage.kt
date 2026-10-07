@@ -1,5 +1,7 @@
 package com.megamaced.nccollectives.data.api
 
+import kotlinx.serialization.SerializationException
+
 /**
  * Map a failed [ApiResult] to a short user-facing message. Returns null for
  * [ApiResult.Success]; callers handle the success branch themselves.
@@ -11,7 +13,19 @@ internal fun ApiResult<*>.userMessage(): String? =
         is ApiResult.HttpError -> httpMessage(code)
         is ApiResult.Unauthorised -> "Session expired — please log in again."
         is ApiResult.Conflict -> "Page changed on the server while you were editing."
-        is ApiResult.Unexpected -> cause.message ?: "Unexpected error"
+        is ApiResult.Unexpected -> unexpectedMessage(cause)
+    }
+
+/**
+ * S9: kotlinx.serialization quotes the input it couldn't parse, and a reply
+ * can carry a token — a `directediting` session URL, say — so that message
+ * is never shown. The other causes that reach here are the app's own
+ * wording.
+ */
+private fun unexpectedMessage(cause: Throwable): String =
+    when (cause) {
+        is SerializationException -> "The server sent a response the app couldn't read."
+        else -> cause.message ?: "Unexpected error"
     }
 
 /**
@@ -36,6 +50,7 @@ internal fun ApiResult<*>.userMessage(): String? =
  * to surface a string written for web-app developers. Not worth it for a
  * case whose honest summary is already short.
  */
+
 private fun httpMessage(code: Int): String =
     when (code) {
         403 -> "Access refused (403). You may not have permission, or it may no longer exist."

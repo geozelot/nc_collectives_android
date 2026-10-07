@@ -34,4 +34,18 @@ class ApiErrorMessageTest {
     fun `success has no message`() {
         assertNull(ApiResult.Success(Unit).userMessage())
     }
+
+    @Test
+    fun `an unreadable response is described without quoting it`() {
+        // kotlinx.serialization quotes the input it choked on, and a
+        // directediting reply carries a session token in its URL.
+        val cause = kotlinx.serialization.SerializationException(
+            "Unexpected JSON token at offset 12. JSON input: {\"url\":\"https://cloud.example/s/secret-token\"}",
+        )
+
+        val message = ApiResult.Unexpected(cause).userMessage()!!
+
+        assertTrue(message, "secret-token" !in message)
+        assertEquals("The server sent a response the app couldn't read.", message)
+    }
 }

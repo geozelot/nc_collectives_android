@@ -275,7 +275,9 @@ class TokenStore
                 }
                 parsed.also { cached = it }
             } catch (e: Exception) {
-                Timber.w(e, "Reading credentials failed; resetting store")
+                // S9: the class, not the exception: a decode failure's
+                // message quotes the decrypted JSON, app passwords included.
+                Timber.w("Reading credentials failed (%s); resetting store", e.javaClass.simpleName)
                 prefs = null
                 cached = null
                 resetPrefsFile()
