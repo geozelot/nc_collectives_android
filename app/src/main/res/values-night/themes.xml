@@ -1,0 +1,15 @@
+<?xml version="1.0" encoding="utf-8"?>
+<resources>
+    <!-- Theme T2: the night variant of the activity theme. It used to be
+         light in every mode: a white window showed through in transitions,
+         behind the keyboard animation, on screens that draw no background,
+         and behind the editor WebView before it painted. The WebView also
+         takes prefers-color-scheme from this theme's isLightTheme (dark
+         parent, so false). -->
+    <style name="Theme.NcCollectives" parent="android:Theme.Material.NoActionBar">
+        <item name="android:statusBarColor">@android:color/transparent</item>
+        <item name="android:navigationBarColor">@android:color/transparent</item>
+        <item name="android:windowLightStatusBar">false</item>
+        <item name="android:windowBackground">@color/window_background</item>
+    </style>
+</resources>

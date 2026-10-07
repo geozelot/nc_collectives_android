@@ -7,4 +7,9 @@
          official Nextcloud icons on a homescreen without colour drift. -->
     <color name="ic_launcher_background">#0082C9</color>
     <color name="ic_launcher_foreground">#FBF8F3</color>
+    <!-- Theme T2: what shows before Compose draws its first frame, and
+         wherever it draws nothing. The brand light background here, the dark
+         one in values-night/colors.xml. NcCollectivesTheme replaces it with
+         the active scheme's background once composed. -->
+    <color name="window_background">#FBF8F3</color>
 </resources>
