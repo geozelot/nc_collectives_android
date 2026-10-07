@@ -6,6 +6,7 @@ import com.megamaced.nccollectives.data.api.AuthInterceptor
 import com.megamaced.nccollectives.data.api.PageBodyService
 import com.megamaced.nccollectives.data.auth.AccountSummary
 import com.megamaced.nccollectives.data.auth.AccountSwitcher
+import com.megamaced.nccollectives.data.auth.AppPasswordRevoker
 import com.megamaced.nccollectives.data.auth.AuthState
 import com.megamaced.nccollectives.data.auth.LocalDataWiper
 import com.megamaced.nccollectives.data.auth.SessionManager
@@ -89,6 +90,7 @@ class SessionExpiryIntegrationTest {
             syncScheduler = env.syncScheduler,
             sharePayloadHolder = SharePayloadHolder(),
             database = env.db,
+            appPasswordRevoker = AppPasswordRevoker(client),
         )
         accountSwitcher = switcher
         bodyService = PageBodyService(client, env.tokenStore)
