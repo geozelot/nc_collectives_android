@@ -112,6 +112,7 @@ class PageEditViewModelTest {
             savedStateHandle = SavedStateHandle(mapOf(Destination.PageEdit.ARG_PAGE_ID to PAGE)),
             repository = pages,
             attachmentRepository = attachments,
+            draftSpill = mockk(relaxed = true),
         )
 
     private fun page(bodyMd: String?) =
