@@ -11,6 +11,7 @@ import com.megamaced.nccollectives.data.api.PageBodyService
 import com.megamaced.nccollectives.data.auth.AccountGeneration
 import com.megamaced.nccollectives.data.auth.AuthState
 import com.megamaced.nccollectives.data.auth.SessionManager
+import com.megamaced.nccollectives.data.db.NcCollectivesDatabase
 import com.megamaced.nccollectives.data.db.dao.AttachmentDao
 import com.megamaced.nccollectives.data.db.dao.PageDao
 import com.megamaced.nccollectives.data.db.entity.AttachmentEntity
@@ -65,6 +66,7 @@ class AttachmentUploadWorker
         private val pageRepository: PageRepository,
         private val accountGeneration: AccountGeneration,
         private val sessionManager: SessionManager,
+        private val database: NcCollectivesDatabase,
     ) : CoroutineWorker(appContext, params) {
         override suspend fun doWork(): Result {
             // B-105: see SyncWorker. The staged rows wait for the session
@@ -180,53 +182,80 @@ class AttachmentUploadWorker
                         }
                     when (put) {
                         is ApiResult.Success -> {
-                            if (!accountGeneration.isCurrent(generation)) {
-                                Timber.i("Account changed mid-upload; not recording %s", row.id)
-                                gcStaged(row.id)
-                                return Result.success()
-                            }
-                            // Issue #23: `row` is a snapshot from before the
-                            // PUT, and the upsert below is an insert. A row
-                            // that has gone or been tombstoned since must not
-                            // be recreated as REMOTE by its own upload
-                            // finishing.
-                            //
-                            // Issue #35: a delete leaves a DELETING row
-                            // rather than no row, so that arm hands the
-                            // just-uploaded object to `resolveDeletion` —
-                            // which is the difference between the UI's
-                            // "deleted" being true and the file reappearing
-                            // on the next listing. A missing row means the
-                            // page itself went (a collective cascade), and
-                            // there is nothing addressable left to delete.
-                            val current = attachmentDao.getById(row.id)
-                            if (current == null) {
-                                Timber.i("Attachment %s vanished mid-upload; not recording it", row.id)
-                                gcStaged(row.id)
-                                continue
-                            }
-                            if (current.status == AttachmentEntity.STATUS_DELETING) {
-                                Timber.i("Attachment %s was cancelled mid-upload; removing what landed", row.id)
-                                if (attachmentRepository.resolveDeletion(row.pageId, row.fileName) !is ApiResult.Success) {
-                                    retry = true
-                                }
-                                continue
-                            }
                             val size = sizeOf(uri)
-                            attachmentDao.upsert(
-                                row.copy(
-                                    contentType = contentType,
-                                    size = size,
-                                    etag = put.data,
-                                    lastModifiedMs = System.currentTimeMillis(),
-                                    status = AttachmentEntity.STATUS_REMOTE,
-                                    localUriString = null,
-                                    lastSyncedAt = System.currentTimeMillis(),
-                                ),
-                            )
-                            // B-29: bytes are safely on the server now; drop the
-                            // staging copy.
-                            gcStaged(row.id)
+                            // D7b: the generation check, the re-read and the
+                            // upsert in one transaction, which is what makes
+                            // the check a barrier (see `AccountGeneration`).
+                            // Checked first and written afterwards, a wipe
+                            // could land in between and the upsert hand the
+                            // next account this one's attachment row.
+                            val landed = accountGeneration.commitIfCurrent(database, generation) {
+                                // Issue #23: `row` is a snapshot from before
+                                // the PUT, and the upsert below is an insert.
+                                // A row that has gone or been tombstoned since
+                                // must not be recreated as REMOTE by its own
+                                // upload finishing.
+                                //
+                                // Issue #35: a delete leaves a DELETING row
+                                // rather than no row, so that case hands the
+                                // just-uploaded object to `resolveDeletion` —
+                                // which is the difference between the UI's
+                                // "deleted" being true and the file
+                                // reappearing on the next listing. A missing
+                                // row means the page itself went (a collective
+                                // cascade), and there is nothing addressable
+                                // left to delete.
+                                val current = attachmentDao.getById(row.id)
+                                when {
+                                    current == null -> {
+                                        UploadLanding.Vanished
+                                    }
+
+                                    current.status == AttachmentEntity.STATUS_DELETING -> {
+                                        UploadLanding.Cancelled
+                                    }
+
+                                    else -> {
+                                        attachmentDao.upsert(
+                                            row.copy(
+                                                contentType = contentType,
+                                                size = size,
+                                                etag = put.data,
+                                                lastModifiedMs = System.currentTimeMillis(),
+                                                status = AttachmentEntity.STATUS_REMOTE,
+                                                localUriString = null,
+                                                lastSyncedAt = System.currentTimeMillis(),
+                                            ),
+                                        )
+                                        UploadLanding.Recorded
+                                    }
+                                }
+                            }
+                            when (landed) {
+                                null -> {
+                                    Timber.i("Account changed mid-upload; not recording %s", row.id)
+                                    gcStaged(row.id)
+                                    return Result.success()
+                                }
+
+                                UploadLanding.Vanished -> {
+                                    Timber.i("Attachment %s vanished mid-upload; not recording it", row.id)
+                                    gcStaged(row.id)
+                                }
+
+                                UploadLanding.Cancelled -> {
+                                    Timber.i("Attachment %s was cancelled mid-upload; removing what landed", row.id)
+                                    if (attachmentRepository.resolveDeletion(row.pageId, row.fileName) !is ApiResult.Success) {
+                                        retry = true
+                                    }
+                                }
+
+                                UploadLanding.Recorded -> {
+                                    // B-29: bytes are safely on the server now;
+                                    // drop the staging copy.
+                                    gcStaged(row.id)
+                                }
+                            }
                         }
 
                         is ApiResult.NetworkError -> {
@@ -517,6 +546,18 @@ internal fun tombstoneFailureAction(
         isRetryableFailure(result) -> TombstoneFailureAction.RetryLater
         else -> TombstoneFailureAction.GiveUp
     }
+
+/** What became of a row whose upload the server accepted. */
+private enum class UploadLanding {
+    /** Recorded as REMOTE. */
+    Recorded,
+
+    /** The row went while the PUT was out (a collective cascade). */
+    Vanished,
+
+    /** The user deleted it while the PUT was out; what landed must go. */
+    Cancelled,
+}
 
 /** What a failed upload attempt means for the row. */
 internal enum class UploadFailureAction {

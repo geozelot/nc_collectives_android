@@ -333,6 +333,7 @@ class AttachmentUploadWorkerIntegrationTest {
                             pageRepository = env.pageRepository,
                             accountGeneration = env.accountGeneration,
                             sessionManager = env.sessionManager,
+                            database = env.db,
                         )
                 },
             ).build()
