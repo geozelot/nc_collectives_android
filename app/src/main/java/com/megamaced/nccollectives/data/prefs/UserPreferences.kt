@@ -2,6 +2,7 @@ package com.megamaced.nccollectives.data.prefs
 
 import android.content.Context
 import androidx.datastore.preferences.core.Preferences
+import androidx.datastore.preferences.core.booleanPreferencesKey
 import androidx.datastore.preferences.core.edit
 import androidx.datastore.preferences.core.longPreferencesKey
 import androidx.datastore.preferences.core.stringPreferencesKey
@@ -93,6 +94,14 @@ enum class SyncCadence(
 data class UserPrefs(
     val themeMode: ThemeMode = ThemeMode.System,
     val textScale: TextScale = TextScale.Default,
+    /**
+     * Theme T1: Material You, the palette Android 12+ derives from the
+     * wallpaper. On by default, as before. Off means the app's own palette
+     * on every API level. That is the only way to stop the app's colours
+     * changing whenever the wallpaper or an OEM theme does, and the KDoc of
+     * `NcCollectivesTheme` had promised a setting for it that didn't exist.
+     */
+    val dynamicColor: Boolean = true,
     val syncCadence: SyncCadence = SyncCadence.SixHourly,
     val recentSearches: List<String> = emptyList(),
     val editorPreference: EditorPreference = EditorPreference.PreferPlain,
@@ -140,6 +149,10 @@ class UserPreferences
 
         suspend fun setTextScale(scale: TextScale) {
             context.dataStore.edit { it[KEY_TEXT_SCALE] = scale.name }
+        }
+
+        suspend fun setDynamicColor(enabled: Boolean) {
+            context.dataStore.edit { it[KEY_DYNAMIC_COLOR] = enabled }
         }
 
         suspend fun setSyncCadence(cadence: SyncCadence) {
@@ -204,16 +217,34 @@ class UserPreferences
             }
         }
 
-        /** Wipe everything — invoked by the sign-out flow before the auth state flips. */
+        /**
+         * Wipe everything but the appearance: invoked by the sign-out flow.
+         *
+         * Theme T1: theme, text size and the Material You switch are kept.
+         * They describe how this device's owner reads the app rather than
+         * anything about the account, and a sign-out that reset them read as
+         * the app forgetting a setting the user had made ("it won't stick").
+         * The account switch keeps more (see [clearAccountScoped]).
+         */
         suspend fun clearAll() {
-            context.dataStore.edit { it.clear() }
+            context.dataStore.edit { prefs ->
+                val themeMode = prefs[KEY_THEME_MODE]
+                val textScale = prefs[KEY_TEXT_SCALE]
+                val dynamicColor = prefs[KEY_DYNAMIC_COLOR]
+
+                prefs.clear()
+
+                themeMode?.let { prefs[KEY_THEME_MODE] = it }
+                textScale?.let { prefs[KEY_TEXT_SCALE] = it }
+                dynamicColor?.let { prefs[KEY_DYNAMIC_COLOR] = it }
+            }
         }
 
         /**
          * Wipe everything that belongs to the signed-in account, for an
          * account switch (issue #14).
          *
-         * Kept: theme, text scale, sync cadence, editor preference, and the
+         * Kept: theme, text scale, Material You, sync cadence, editor preference, and the
          * update-check bookkeeping. Those describe how the user has set this
          * *device* up — resetting the theme because they looked at their
          * other server would be a bug — and the GitHub update check has
@@ -234,6 +265,7 @@ class UserPreferences
                 // corrupt a setting.
                 val themeMode = prefs[KEY_THEME_MODE]
                 val textScale = prefs[KEY_TEXT_SCALE]
+                val dynamicColor = prefs[KEY_DYNAMIC_COLOR]
                 val syncCadence = prefs[KEY_SYNC_CADENCE]
                 val editorPreference = prefs[KEY_EDITOR_PREFERENCE]
 
@@ -241,6 +273,7 @@ class UserPreferences
 
                 themeMode?.let { prefs[KEY_THEME_MODE] = it }
                 textScale?.let { prefs[KEY_TEXT_SCALE] = it }
+                dynamicColor?.let { prefs[KEY_DYNAMIC_COLOR] = it }
                 syncCadence?.let { prefs[KEY_SYNC_CADENCE] = it }
                 editorPreference?.let { prefs[KEY_EDITOR_PREFERENCE] = it }
             }
@@ -280,6 +313,7 @@ class UserPreferences
             return UserPrefs(
                 themeMode = mode,
                 textScale = textScale,
+                dynamicColor = this[KEY_DYNAMIC_COLOR] ?: true,
                 syncCadence = cadence,
                 recentSearches = this[KEY_RECENT_SEARCHES].toList(),
                 editorPreference = editorPreference,
@@ -299,6 +333,7 @@ class UserPreferences
         private companion object {
             val KEY_THEME_MODE = stringPreferencesKey("theme_mode")
             val KEY_TEXT_SCALE = stringPreferencesKey("text_scale")
+            val KEY_DYNAMIC_COLOR = booleanPreferencesKey("dynamic_color")
             val KEY_SYNC_CADENCE = stringPreferencesKey("sync_cadence")
             val KEY_RECENT_SEARCHES = stringPreferencesKey("recent_searches")
             val KEY_EDITOR_PREFERENCE = stringPreferencesKey("editor_preference")
