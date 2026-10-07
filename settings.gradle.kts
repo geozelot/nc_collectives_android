@@ -15,7 +15,16 @@ pluginManagement {
 dependencyResolutionManagement {
     repositoriesMode.set(RepositoriesMode.FAIL_ON_PROJECT_REPOS)
     repositories {
-        google()
+        // Same filter as for plugins: Google's repository is asked only for
+        // the groups it hosts, so a name it doesn't own can only come from
+        // Maven Central, where namespaces are verified.
+        google {
+            content {
+                includeGroupByRegex("com\\.android.*")
+                includeGroupByRegex("com\\.google.*")
+                includeGroupByRegex("androidx.*")
+            }
+        }
         mavenCentral()
     }
 }
