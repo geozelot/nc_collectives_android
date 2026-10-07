@@ -29,6 +29,16 @@
         android:theme="@style/Theme.NcCollectives"
         tools:targetApi="36">
 
+        <!--
+            S-32: no WebView Safe Browsing, which checks the URLs the editor
+            loads with Google's Safe Browsing service. The editor only
+            navigates within the user's own server (S-22), and the README
+            promises the app talks to that server alone.
+        -->
+        <meta-data
+            android:name="android.webkit.WebView.EnableSafeBrowsing"
+            android:value="false" />
+
         <activity
             android:name=".MainActivity"
             android:exported="true"
