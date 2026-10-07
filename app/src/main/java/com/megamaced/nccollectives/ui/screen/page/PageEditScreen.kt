@@ -53,6 +53,7 @@ import androidx.compose.runtime.LaunchedEffect
 import androidx.compose.runtime.getValue
 import androidx.compose.runtime.mutableStateOf
 import androidx.compose.runtime.remember
+import androidx.compose.runtime.rememberCoroutineScope
 import androidx.compose.runtime.saveable.rememberSaveable
 import androidx.compose.runtime.setValue
 import androidx.compose.ui.Modifier
@@ -69,6 +70,7 @@ import com.megamaced.nccollectives.ui.components.LoadingState
 import com.megamaced.nccollectives.ui.components.MarkdownView
 import com.megamaced.nccollectives.ui.components.SnackbarStatusEffect
 import com.megamaced.nccollectives.ui.theme.LocalTextScale
+import kotlinx.coroutines.launch
 
 @OptIn(ExperimentalMaterial3Api::class)
 @Composable
@@ -162,7 +164,10 @@ internal fun PageEditScreen(
     // was lost, `rememberSaveable` in `rememberCameraCapture` (B-31)
     // notwithstanding, because the composable holding it no longer existed.
     // `AttachmentsScreen` has always hoisted these; the two paths now match.
-    val cameraCapture = rememberCameraCapture { uri, displayName ->
+    val cameraScope = rememberCoroutineScope()
+    val cameraCapture = rememberCameraCapture(
+        onUnavailable = { cameraScope.launch { snackbarHostState.showSnackbar("No camera app on this device.") } },
+    ) { uri, displayName ->
         viewModel.enqueueAttachment(uri, displayName, "image/jpeg")
     }
     val galleryLauncher = rememberLauncherForActivityResult(

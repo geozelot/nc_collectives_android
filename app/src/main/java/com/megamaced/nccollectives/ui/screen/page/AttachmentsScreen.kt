@@ -53,6 +53,7 @@ import androidx.compose.runtime.LaunchedEffect
 import androidx.compose.runtime.getValue
 import androidx.compose.runtime.mutableStateOf
 import androidx.compose.runtime.remember
+import androidx.compose.runtime.rememberCoroutineScope
 import androidx.compose.runtime.setValue
 import androidx.compose.ui.Alignment
 import androidx.compose.ui.Modifier
@@ -70,6 +71,7 @@ import com.megamaced.nccollectives.ui.attachment.rememberCameraCapture
 import com.megamaced.nccollectives.ui.attachment.uriDisplayName
 import com.megamaced.nccollectives.ui.components.EmptyState
 import com.megamaced.nccollectives.ui.components.SnackbarStatusEffect
+import kotlinx.coroutines.launch
 
 @OptIn(ExperimentalMaterial3Api::class)
 @Composable
@@ -87,7 +89,10 @@ internal fun AttachmentsScreen(
 
     SnackbarStatusEffect(ui.statusMessage, snackbarHostState, viewModel::dismissStatus)
 
-    val cameraCapture = rememberCameraCapture { uri, displayName ->
+    val cameraScope = rememberCoroutineScope()
+    val cameraCapture = rememberCameraCapture(
+        onUnavailable = { cameraScope.launch { snackbarHostState.showSnackbar("No camera app on this device.") } },
+    ) { uri, displayName ->
         viewModel.enqueueUpload(uri, displayName, "image/jpeg")
     }
     val galleryLauncher = rememberLauncherForActivityResult(
