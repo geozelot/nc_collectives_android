@@ -26,6 +26,10 @@ import androidx.compose.ui.unit.dp
  * an If-Match race — and it sits one button-width from "Replace page". It
  * gets a confirmation dialog, the same as every other destructive action in
  * the app (page trash, collective trash, attachment delete).
+ *
+ * "Replace page" is destructive too, the other way round: it overwrites
+ * whatever the server holds, including what someone else wrote since the
+ * user started editing. It asks first as well.
  */
 @Composable
 fun ConflictBanner(
@@ -36,6 +40,7 @@ fun ConflictBanner(
 ) {
     val clipboard = LocalClipboardManager.current
     var confirmDiscard by rememberSaveable { mutableStateOf(false) }
+    var confirmReplace by rememberSaveable { mutableStateOf(false) }
     Column(
         modifier = modifier
             .fillMaxWidth()
@@ -61,7 +66,7 @@ fun ConflictBanner(
         ) {
             TextButton(onClick = { clipboard.setText(AnnotatedString(draft)) }) { Text("Copy") }
             TextButton(onClick = { confirmDiscard = true }) { Text("Discard") }
-            TextButton(onClick = onReplace) { Text("Replace page") }
+            TextButton(onClick = { confirmReplace = true }) { Text("Replace page") }
         }
     }
 
@@ -83,6 +88,28 @@ fun ConflictBanner(
             },
             dismissButton = {
                 TextButton(onClick = { confirmDiscard = false }) { Text("Keep draft") }
+            },
+        )
+    }
+
+    if (confirmReplace) {
+        AlertDialog(
+            onDismissRequest = { confirmReplace = false },
+            title = { Text("Replace the page with your draft?") },
+            text = {
+                Text(
+                    "The page on the server will be overwritten with your draft, including any changes " +
+                        "someone else made since you started editing. Use Copy first if you want to compare.",
+                )
+            },
+            confirmButton = {
+                TextButton(onClick = {
+                    confirmReplace = false
+                    onReplace()
+                }) { Text("Replace with my draft") }
+            },
+            dismissButton = {
+                TextButton(onClick = { confirmReplace = false }) { Text("Cancel") }
             },
         )
     }

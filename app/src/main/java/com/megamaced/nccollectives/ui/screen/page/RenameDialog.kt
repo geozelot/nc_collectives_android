@@ -31,13 +31,13 @@ fun RenameDialog(
                 label = { Text("Title") },
                 keyboardOptions = KeyboardOptions(imeAction = ImeAction.Done),
                 keyboardActions = KeyboardActions(onDone = {
-                    if (value.isNotBlank()) onRename(value.trim())
+                    if (renameAllowed(value, currentTitle)) onRename(value.trim())
                 }),
             )
         },
         confirmButton = {
             TextButton(
-                enabled = value.isNotBlank() && value.trim() != currentTitle,
+                enabled = renameAllowed(value, currentTitle),
                 onClick = { onRename(value.trim()) },
             ) { Text("Rename") }
         },
@@ -46,3 +46,13 @@ fun RenameDialog(
         },
     )
 }
+
+/**
+ * Whether [value] may be submitted as a rename of a page titled [current]:
+ * something other than whitespace, and different once trimmed. The button
+ * and the keyboard's Done both ask this; Done used to check only the first.
+ */
+internal fun renameAllowed(
+    value: String,
+    current: String,
+): Boolean = value.isNotBlank() && value.trim() != current
