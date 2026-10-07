@@ -18,8 +18,20 @@ interface EditQueueDao {
      * single transaction open for the whole run. Subsequent worker runs
      * pick up the next batch.
      */
-    @Query("SELECT * FROM edit_queue WHERE status != 'CONFLICTED' ORDER BY queuedAt ASC LIMIT :limit")
+    @Query("SELECT * FROM edit_queue WHERE status != 'CONFLICTED' ORDER BY queuedAt ASC, pageId ASC LIMIT :limit")
     suspend fun pendingEntries(limit: Int = 100): List<EditQueueEntity>
+
+    /** The next [limit] rows after (afterQueuedAt, afterPageId) in [pendingEntries]' order. */
+    @Query(
+        "SELECT * FROM edit_queue WHERE status != 'CONFLICTED' " +
+            "AND (queuedAt > :afterQueuedAt OR (queuedAt = :afterQueuedAt AND pageId > :afterPageId)) " +
+            "ORDER BY queuedAt ASC, pageId ASC LIMIT :limit",
+    )
+    suspend fun pendingEntriesAfter(
+        afterQueuedAt: Long,
+        afterPageId: Long,
+        limit: Int,
+    ): List<EditQueueEntity>
 
     @Query("SELECT * FROM edit_queue WHERE pageId = :pageId LIMIT 1")
     suspend fun forPage(pageId: Long): EditQueueEntity?

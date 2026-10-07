@@ -59,10 +59,32 @@ class EditFlushWorker
             // worker cannot stop it, so an account switch has no other way
             // to keep its writes out of the incoming account's cache.
             val generation = accountGeneration.current()
-            val entries = editQueueDao.pendingEntries()
-            if (entries.isEmpty()) return Result.success()
+            return flushFrom(generation, after = null, retried = false)
+        }
 
-            var retry = false
+        /**
+         * One batch of the queue — the rows after [after] in queue order, or
+         * the first ones — and then the next batch.
+         *
+         * A run used to read one batch of [FLUSH_BATCH] rows and stop, with
+         * nothing scheduling the rest: past the hundredth queued edit, they
+         * waited for the next save or the next time the app came to the
+         * front. Paged by (queuedAt, pageId) after the last row seen, so a
+         * row this run left pending is not handed back to it.
+         */
+        private suspend fun flushFrom(
+            generation: Long,
+            after: EditQueueEntity?,
+            retried: Boolean,
+        ): Result {
+            val entries = if (after == null) {
+                editQueueDao.pendingEntries(FLUSH_BATCH)
+            } else {
+                editQueueDao.pendingEntriesAfter(after.queuedAt, after.pageId, FLUSH_BATCH)
+            }
+            if (entries.isEmpty()) return if (retried) Result.retry() else Result.success()
+
+            var retry = retried
             for (entry in entries) {
                 // Issue #30: claiming the row is also what spends one of its
                 // own attempts. `attemptsSoFar` is what the classifier below
@@ -181,6 +203,7 @@ class EditFlushWorker
                     FlushRowOutcome.SessionGone -> return Result.success()
                 }
             }
+            if (entries.size == FLUSH_BATCH) return flushFrom(generation, entries.last(), retry)
             return if (retry) Result.retry() else Result.success()
         }
 
@@ -370,8 +393,7 @@ internal enum class FlushFailureAction {
  * Both failure arms used to set the row back to `PENDING` and return
  * `Result.retry()`. WorkManager applies no attempt cap of its own, so a
  * permanent failure — the page deleted server-side (404), edit rights
- * revoked (403), the file locked by another client (423), the quota full
- * (507) — retried on an exponential backoff capped at five hours, for as
+ * revoked (403), the quota full (507) — retried on an exponential backoff capped at five hours, for as
  * long as the app stayed installed. Worse, it did so invisibly: only
  * `CONFLICTED` rows put anything on screen, so the user's edit was neither
  * saved nor surfaced.
@@ -389,7 +411,12 @@ internal enum class FlushFailureAction {
  * issue #30, a `NetworkError`.
  *
  * 408 and 429 are 4xx by number and transient by meaning: request timeout
- * and rate limiting are exactly the cases retrying is *for*.
+ * and rate limiting are exactly the cases retrying is *for*. So is 423
+ * Locked: someone has the page open in Text, or files_lock holds it, and
+ * both let go when they're done. It used to be terminal, which parked the
+ * edit as a conflict the user had to resolve by hand when it would have
+ * landed a minute later; [MAX_FLUSH_ATTEMPTS] still bounds a lock that
+ * never goes.
  */
 internal fun flushFailureAction(
     httpCode: Int?,
@@ -398,7 +425,7 @@ internal fun flushFailureAction(
     when {
         runAttemptCount >= MAX_FLUSH_ATTEMPTS -> FlushFailureAction.Terminal
         httpCode == null -> FlushFailureAction.RetryLater
-        httpCode == 408 || httpCode == 429 -> FlushFailureAction.RetryLater
+        httpCode == 408 || httpCode == 429 || httpCode == 423 -> FlushFailureAction.RetryLater
         httpCode in 400..499 -> FlushFailureAction.Terminal
         httpCode == 507 -> FlushFailureAction.Terminal
         else -> FlushFailureAction.RetryLater
@@ -416,6 +443,9 @@ internal fun flushFailureAction(
  * newer request that could have flushed it.
  */
 internal const val MAX_FLUSH_ATTEMPTS = 10
+
+/** Queue rows read at a time by one flush run; it reads batches until none are left. */
+internal const val FLUSH_BATCH = 100
 
 /**
  * The HTTP status behind [result], or null when the failure never got one

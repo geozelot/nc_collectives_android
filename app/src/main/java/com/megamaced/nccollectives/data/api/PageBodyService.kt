@@ -113,6 +113,14 @@ class PageBodyService
          * Writes [body] to the page's WebDAV path. If [baseEtag] is non-null
          * it is sent as `If-Match`, so a 412 fires when the server-side body
          * has changed since [baseEtag] was captured. Returns the new ETag.
+         *
+         * Without one — a forced write, "Replace with my draft" — the PUT
+         * still carries `If-Match: *`: replace the file only if it is there.
+         * Pages are created through OCS, never by this PUT, so a missing file
+         * means the page was renamed or moved on the server, and a PUT with
+         * no precondition created a ghost page at the old path. That is a 412
+         * now, which the callers already treat as a conflict and keep the
+         * user's text for.
          */
         suspend fun saveBody(
             collectivePath: String,
@@ -126,9 +134,7 @@ class PageBodyService
                 .Builder()
                 .url(url)
                 .put(body.toRequestBody(MARKDOWN.toMediaType()))
-            if (baseEtag != null) {
-                builder.header("If-Match", "\"$baseEtag\"")
-            }
+            builder.header("If-Match", if (baseEtag != null) "\"$baseEtag\"" else "*")
             return webDavCall(builder.build()) { response -> normaliseEtag(response.header("ETag")) }
         }
 

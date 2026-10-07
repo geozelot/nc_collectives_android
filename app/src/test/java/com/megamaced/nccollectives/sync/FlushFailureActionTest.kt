@@ -23,7 +23,6 @@ class FlushFailureActionTest {
         // longer write it. Retrying is pure battery.
         assertEquals(FlushFailureAction.Terminal, flushFailureAction(404, runAttemptCount = 0))
         assertEquals(FlushFailureAction.Terminal, flushFailureAction(403, runAttemptCount = 0))
-        assertEquals(FlushFailureAction.Terminal, flushFailureAction(423, runAttemptCount = 0))
         assertEquals(FlushFailureAction.Terminal, flushFailureAction(507, runAttemptCount = 0))
     }
 
@@ -32,6 +31,17 @@ class FlushFailureActionTest {
         // 408 and 429 are 4xx by number and "come back later" by meaning.
         assertEquals(FlushFailureAction.RetryLater, flushFailureAction(408, runAttemptCount = 0))
         assertEquals(FlushFailureAction.RetryLater, flushFailureAction(429, runAttemptCount = 0))
+    }
+
+    @Test
+    fun aLockedFile_waitsForTheLockToGo() {
+        // 423 Locked: someone has the page open in Text, or files_lock holds
+        // it. Both release it when they're done, and parking the edit as a
+        // conflict on the first 423 made the user resolve by hand an edit
+        // that would have landed a minute later. MAX_FLUSH_ATTEMPTS still
+        // bounds a lock that never goes.
+        assertEquals(FlushFailureAction.RetryLater, flushFailureAction(423, runAttemptCount = 0))
+        assertEquals(FlushFailureAction.Terminal, flushFailureAction(423, runAttemptCount = MAX_FLUSH_ATTEMPTS))
     }
 
     @Test

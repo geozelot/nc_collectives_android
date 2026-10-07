@@ -165,7 +165,9 @@ class EditFlushWorkerIntegrationTest {
                     ?.status,
             )
             val put = dispatcher.requestsWithMethod("PUT").single()
-            assertNull("a force-write sends no precondition", put.getHeader("If-Match"))
+            // It overrides the etag, not the file's existence: a page renamed
+            // away on the server must not get a ghost at the old path.
+            assertEquals("*", put.getHeader("If-Match"))
         }
 
     @Test
