@@ -22,7 +22,7 @@ keytool -genkeypair -v \
 
 ## GitHub Actions secrets
 
-The CI workflow (`.github/workflows/build.yml`) reads four secrets when it runs on a tag matching `v*`:
+The CI workflow (`.github/workflows/build.yml`) reads four secrets, and only in its `sign` job, which runs only on a tag matching `v*`. No other job, and no main or PR build, ever sees them:
 
 | Secret name                          | Value                                                                  |
 |--------------------------------------|------------------------------------------------------------------------|
@@ -31,7 +31,7 @@ The CI workflow (`.github/workflows/build.yml`) reads four secrets when it runs 
 | `ANDROID_RELEASE_KEY_ALIAS`          | `nc_collectives` (the alias passed to `keytool -alias`)                |
 | `ANDROID_RELEASE_KEY_PASSWORD`       | The key password (same as the store password if you used one passphrase) |
 
-Set them under **Repo Settings → Secrets and variables → Actions → New repository secret**.
+Set them as secrets of the **`release` environment**: **Repo Settings → Environments → release → Environment secrets**. GitHub creates the environment on the first tag run; repository secrets also work, but environment secrets are visible to the `sign` job alone. On the same page, restrict the environment's deployment tags to `v*` and, optionally, require a reviewer, so that a tag can't sign anything until it's approved.
 
 To produce the base64 string, on Linux/macOS:
 
@@ -41,7 +41,7 @@ base64 -w0 release.keystore | xclip -sel c  # Linux (xclip)
 base64 -w0 release.keystore                 # then paste manually
 ```
 
-The CI step `Decode release keystore` writes the keystore back to `$RUNNER_TEMP/release.keystore` and exports the four `ANDROID_RELEASE_*` env vars that the Gradle script consumes.
+The `sign` job's `Build and sign the release APK` step writes the keystore to `$RUNNER_TEMP/release.keystore` for that one Gradle invocation (deleted when the step ends) and passes the passwords in that step's environment only. It then checks that the APK carries the certificate F-Droid pins (`AllowedAPKSigningKeys` in `docs/fdroid/`).
 
 ## Local signed builds
 
