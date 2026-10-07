@@ -254,6 +254,7 @@ class AttachmentUploadWorkerIntegrationTest {
                             attachmentRepository = env.attachmentRepository,
                             pageRepository = env.pageRepository,
                             accountGeneration = env.accountGeneration,
+                            database = env.db,
                         )
                 },
             ).build()

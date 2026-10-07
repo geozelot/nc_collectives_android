@@ -1,5 +1,8 @@
 package com.megamaced.nccollectives.data.auth
 
+import androidx.room.RoomDatabase
+import androidx.room.withTransaction
+import timber.log.Timber
 import java.util.concurrent.atomic.AtomicLong
 import javax.inject.Inject
 import javax.inject.Singleton
@@ -27,10 +30,12 @@ import javax.inject.Singleton
  *  - its transaction starts after the bump, sees a stale generation, and
  *    abandons.
  *
- * There is no third ordering. Note which writes need it: an `UPDATE` or a
- * `DELETE` landing after the clear matches no rows and is harmless, so the
- * guard belongs on the upserts — those are what resurrect a wiped account's
- * data.
+ * There is no third ordering. Which writes need it: every one that follows
+ * a network call (D7b). An upsert resurrects a wiped account's data. An
+ * `UPDATE` or a `DELETE` matches no rows straight after the clear, but not
+ * once the incoming account has synced: pages and attachments key on raw
+ * server ids, so the outgoing account's page 17 is then the incoming
+ * account's page 17. [commitIfCurrent] is the guard in one call.
  *
  * Process-wide rather than persisted on purpose. It answers "has the account
  * changed since this in-memory coroutine started", which has no meaning
@@ -60,4 +65,35 @@ class AccountGeneration
         fun invalidate() {
             generation.incrementAndGet()
         }
+
+        /**
+         * Run [block] in one Room transaction, behind the check that makes it
+         * a barrier against a wipe. Returns null, having written nothing,
+         * when the account has changed since [captured].
+         *
+         * D7b: for the writes that follow a network call — capture before
+         * the request, commit through this after it.
+         */
+        suspend fun <T> commitIfCurrent(
+            database: RoomDatabase,
+            captured: Long,
+            block: suspend () -> T,
+        ): T? =
+            database.withTransaction {
+                if (isCurrent(captured)) {
+                    block()
+                } else {
+                    Timber.i("The account changed while a request was out; dropping the write that followed it")
+                    null
+                }
+            }
     }
+
+/**
+ * What a call reports when [AccountGeneration.commitIfCurrent] dropped the
+ * write that would have made its success true: a page created or copied on
+ * the server but not cached, an edit neither saved nor queued.
+ */
+class AccountChangedException : IllegalStateException(ACCOUNT_CHANGED_MESSAGE)
+
+const val ACCOUNT_CHANGED_MESSAGE = "The account changed before this was saved on the device"

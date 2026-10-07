@@ -7,6 +7,7 @@ import com.megamaced.nccollectives.data.api.CollectivesApiService
 import com.megamaced.nccollectives.data.api.apiCall
 import com.megamaced.nccollectives.data.api.ifSuccess
 import com.megamaced.nccollectives.data.api.mapSuccess
+import com.megamaced.nccollectives.data.auth.AccountChangedException
 import com.megamaced.nccollectives.data.auth.AccountGeneration
 import com.megamaced.nccollectives.data.db.NcCollectivesDatabase
 import com.megamaced.nccollectives.data.db.dao.AttachmentDao
@@ -44,14 +45,20 @@ class CollectiveRepositoryImpl
 
         override suspend fun cachedCollectives(): List<Collective> = dao.list().map { it.toDomain() }
 
-        override suspend fun refresh(): ApiResult<Unit> =
+        override suspend fun refresh(): ApiResult<Unit> = refreshUnder(accountGeneration.current())
+
+        /**
+         * [refresh], committing only while [generation] is current. D7b: a
+         * restore refreshes under the generation its own request went out
+         * with, not one taken after a wipe.
+         */
+        private suspend fun refreshUnder(generation: Long): ApiResult<Unit> =
             apiCall {
-                // Issue #20: captured before the request goes out, checked
-                // inside the transaction that writes its response, so a wipe
-                // landing in between abandons the write instead of
-                // resurrecting the outgoing account's collectives under the
-                // incoming one.
-                val generation = accountGeneration.current()
+                // Issue #20: [generation] was captured before the request
+                // goes out, and is checked inside the transaction that
+                // writes its response, so a wipe landing in between abandons
+                // the write instead of resurrecting the outgoing account's
+                // collectives under the incoming one.
                 val now = System.currentTimeMillis()
                 val response = api.listCollectives()
                 val entities = response.ocs.data.collectives
@@ -102,6 +109,7 @@ class CollectiveRepositoryImpl
                 currentList - pageId
             }
             if (nextList == currentList) return ApiResult.Success(Unit)
+            val generation = accountGeneration.current()
 
             // Optimistic local update so the UI reflects the new state
             // immediately. Roll back on failure.
@@ -110,7 +118,10 @@ class CollectiveRepositoryImpl
                 api.setFavoritePages(collectiveId, nextList.toJsonLongArray())
             }
             if (result !is ApiResult.Success) {
-                dao.updateFavoritePagesCsv(collectiveId, current.userFavoritePagesCsv)
+                // D7b: a rollback is a write after a request too.
+                accountGeneration.commitIfCurrent(database, generation) {
+                    dao.updateFavoritePagesCsv(collectiveId, current.userFavoritePagesCsv)
+                }
             }
             return result
         }
@@ -124,11 +135,13 @@ class CollectiveRepositoryImpl
                 return ApiResult.Unexpected(IllegalArgumentException("Collective name must not be blank"))
             }
             val now = System.currentTimeMillis()
+            val generation = accountGeneration.current()
             return apiCall {
                 api.createCollective(trimmedName, emoji?.takeIf { it.isNotBlank() })
             }.mapSuccess { envelope ->
                 val dto = envelope.ocs.data.collective
-                dao.upsert(dto.toEntity(now))
+                accountGeneration.commitIfCurrent(database, generation) { dao.upsert(dto.toEntity(now)) }
+                    ?: return ApiResult.Unexpected(AccountChangedException())
                 dto.toEntity(now).toDomain()
             }
         }
@@ -146,16 +159,18 @@ class CollectiveRepositoryImpl
             val previousEmoji = current.emoji
             val nextEmoji = emoji.takeIf { it.isNotBlank() }
             if (nextEmoji == previousEmoji) return ApiResult.Success(Unit)
+            val generation = accountGeneration.current()
 
             dao.updateEmoji(collectiveId, nextEmoji)
             val result = apiCall { api.setCollectiveEmoji(collectiveId, emoji) }
             if (result !is ApiResult.Success) {
-                dao.updateEmoji(collectiveId, previousEmoji)
+                accountGeneration.commitIfCurrent(database, generation) { dao.updateEmoji(collectiveId, previousEmoji) }
             }
             return result.mapSuccess { }
         }
 
         override suspend fun trashCollective(collectiveId: Long): ApiResult<Unit> {
+            val generation = accountGeneration.current()
             val result = apiCall { api.trashCollective(collectiveId) }
             if (result is ApiResult.Success) {
                 // Drop the row directly. The local cache only carries
@@ -173,7 +188,7 @@ class CollectiveRepositoryImpl
                 // trade: it could never have been written anyway, since its
                 // WebDAV path moved into the server-side trash with the
                 // collective.
-                database.withTransaction {
+                accountGeneration.commitIfCurrent(database, generation) {
                     cascadeForCollectives(listOf(collectiveId))
                     dao.deleteById(collectiveId)
                 }
@@ -190,20 +205,24 @@ class CollectiveRepositoryImpl
         }
 
         override suspend fun restoreTrashedCollective(collectiveId: Long): ApiResult<Unit> {
+            val generation = accountGeneration.current()
             val result = apiCall { api.restoreTrashedCollective(collectiveId) }
             return result
                 .ifSuccess {
-                    // Pick up the restored collective in the active-list cache.
-                    refresh()
+                    // Pick up the restored collective in the active-list cache
+                    // — under this request's generation, and not at all once
+                    // the account has changed (D7b).
+                    if (accountGeneration.isCurrent(generation)) refreshUnder(generation)
                 }.mapSuccess { }
         }
 
         override suspend fun permanentlyDeleteCollective(collectiveId: Long): ApiResult<Unit> {
+            val generation = accountGeneration.current()
             val result = apiCall {
                 api.permanentlyDeleteCollective(collectiveId, circle = true)
             }
             if (result is ApiResult.Success) {
-                database.withTransaction {
+                accountGeneration.commitIfCurrent(database, generation) {
                     cascadeForCollectives(listOf(collectiveId))
                     dao.deleteById(collectiveId)
                 }

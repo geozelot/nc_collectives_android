@@ -87,6 +87,7 @@ internal class IntegrationEnvironment private constructor(
             bodyService = bodyService,
             syncScheduler = syncScheduler,
             database = db,
+            accountGeneration = accountGeneration,
         )
 
     val pageRepository: PageRepositoryImpl =

@@ -4,12 +4,12 @@ import android.content.Context
 import android.net.Uri
 import android.webkit.MimeTypeMap
 import androidx.core.content.FileProvider
-import androidx.room.withTransaction
 import com.megamaced.nccollectives.data.api.ApiResult
 import com.megamaced.nccollectives.data.api.CollectivesApiService
 import com.megamaced.nccollectives.data.api.PageBodyService
 import com.megamaced.nccollectives.data.api.apiCall
 import com.megamaced.nccollectives.data.api.mapSuccess
+import com.megamaced.nccollectives.data.auth.AccountGeneration
 import com.megamaced.nccollectives.data.db.NcCollectivesDatabase
 import com.megamaced.nccollectives.data.db.dao.AttachmentDao
 import com.megamaced.nccollectives.data.db.dao.PageDao
@@ -40,6 +40,7 @@ class AttachmentRepositoryImpl
         private val bodyService: PageBodyService,
         private val syncScheduler: SyncScheduler,
         private val database: NcCollectivesDatabase,
+        private val accountGeneration: AccountGeneration,
     ) : AttachmentRepository {
         override fun observeForPage(pageId: Long): Flow<List<Attachment>> =
             attachmentDao.observeForPage(pageId).map { rows ->
@@ -58,7 +59,17 @@ class AttachmentRepositoryImpl
                 }
             }
 
-        override suspend fun refresh(pageId: Long): ApiResult<Unit> {
+        override suspend fun refresh(pageId: Long): ApiResult<Unit> = refreshUnder(pageId, accountGeneration.current())
+
+        /**
+         * [refresh], committing only while [generation] is current (D7b,
+         * issue #20's barrier). The listing is reported as the server gave
+         * it either way.
+         */
+        private suspend fun refreshUnder(
+            pageId: Long,
+            generation: Long,
+        ): ApiResult<Unit> {
             val page = pageDao.getById(pageId)
                 ?: return ApiResult.Unexpected(IllegalStateException("Page $pageId not cached"))
             // OCS-3: typed JSON list replaces the WebDAV PROPFIND + XML
@@ -75,7 +86,7 @@ class AttachmentRepositoryImpl
                     // if the user just queued an upload, the worker still
                     // owns that row; replacing it with status=REMOTE +
                     // localUriString=null would orphan the staged bytes.
-                    database.withTransaction {
+                    accountGeneration.commitIfCurrent(database, generation) {
                         val existing = attachmentDao
                             .listForPage(pageId)
                             .associateBy { it.id }
@@ -161,6 +172,11 @@ class AttachmentRepositoryImpl
             suggestedFileName: String,
             contentType: String?,
         ): String? {
+            // D7b: the copy below can take seconds for a large file. A row
+            // committed after the account changed would have the upload
+            // worker send this account's file to the next account's page
+            // with the same id.
+            val generation = accountGeneration.current()
             val resolvedName = resolveCollisionFreeName(pageId, suggestedFileName)
             val resolvedType = contentType ?: guessMimeType(resolvedName)
             // B-29: copy the picked/shared bytes into our own cache before
@@ -183,7 +199,10 @@ class AttachmentRepositoryImpl
                 localUriString = Uri.fromFile(stagedFile).toString(),
                 lastSyncedAt = System.currentTimeMillis(),
             )
-            attachmentDao.upsert(entity)
+            if (accountGeneration.commitIfCurrent(database, generation) { attachmentDao.upsert(entity) } == null) {
+                if (!stagedFile.delete()) Timber.w("Couldn't delete staged copy %s", stagedFile.absolutePath)
+                return null
+            }
             syncScheduler.flushAttachmentUploadsWhenOnline()
             // S-15: camera captures and any other own-FileProvider sources
             // are now redundant — the bytes live in the staged copy and
@@ -238,6 +257,7 @@ class AttachmentRepositoryImpl
             pageId: Long,
             fileName: String,
         ): ApiResult<Unit> {
+            val generation = accountGeneration.current()
             val page = pageDao.getById(pageId)
                 ?: return ApiResult.Unexpected(IllegalStateException("Page $pageId not cached"))
             val key = AttachmentEntity.key(pageId, fileName)
@@ -269,7 +289,7 @@ class AttachmentRepositoryImpl
             // inline to populate it before deleting.
             var serverId = existing?.serverAttachmentId
             if (serverId == null) {
-                val refreshed = refresh(pageId)
+                val refreshed = refreshUnder(pageId, generation)
                 if (refreshed !is ApiResult.Success) return refreshed
                 serverId = attachmentDao.getById(key)?.serverAttachmentId
                     ?: return ApiResult.Unexpected(
@@ -278,7 +298,7 @@ class AttachmentRepositoryImpl
             }
             val result = apiCall { api.deleteAttachment(page.collectiveId, pageId, serverId) }
             if (result is ApiResult.Success) {
-                attachmentDao.delete(key)
+                accountGeneration.commitIfCurrent(database, generation) { attachmentDao.delete(key) }
             }
             return result
         }
@@ -351,6 +371,7 @@ class AttachmentRepositoryImpl
             pageId: Long,
             fileName: String,
         ): String? {
+            val generation = accountGeneration.current()
             val oldKey = AttachmentEntity.key(pageId, fileName)
             val row = attachmentDao.getById(oldKey) ?: return null
             // Best-effort: a fresh listing is what lets the local resolver
@@ -358,7 +379,7 @@ class AttachmentRepositoryImpl
             // handing back one it will refuse for the same reason. Offline,
             // or on a failure, the resolver still bumps past our own row and
             // the next 412 brings us back here.
-            refresh(pageId)
+            refreshUnder(pageId, generation)
             val newName = resolveCollisionFreeName(pageId, fileName)
             val newKey = AttachmentEntity.key(pageId, newName)
             if (newKey == oldKey) return null
@@ -371,7 +392,7 @@ class AttachmentRepositoryImpl
                 Timber.w("Couldn't move the staged copy of %s aside", oldKey)
                 return null
             }
-            database.withTransaction {
+            accountGeneration.commitIfCurrent(database, generation) {
                 attachmentDao.delete(oldKey)
                 attachmentDao.upsert(
                     row.copy(
@@ -386,7 +407,7 @@ class AttachmentRepositoryImpl
                         serverAttachmentId = null,
                     ),
                 )
-            }
+            } ?: return null
             Timber.i("Attachment name %s was taken on the server; re-queued as %s", fileName, newName)
             return newName
         }
