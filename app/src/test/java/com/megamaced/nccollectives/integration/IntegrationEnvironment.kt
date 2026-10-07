@@ -160,7 +160,7 @@ internal class IntegrationEnvironment private constructor(
         attempts: Int = 0,
     ): AttachmentEntity {
         val key = AttachmentEntity.key(pageId, fileName)
-        val staged = File(File(context.cacheDir, "attachments-pending"), key.replace('/', '_'))
+        val staged = AttachmentRepositoryImpl.stagedFileFor(context, key)
         staged.parentFile?.mkdirs()
         staged.writeBytes(bytes)
         val entity = AttachmentEntity(
@@ -186,11 +186,7 @@ internal class IntegrationEnvironment private constructor(
     fun stagedFile(
         pageId: Long,
         fileName: String,
-    ): File =
-        File(
-            File(context.cacheDir, "attachments-pending"),
-            AttachmentEntity.key(pageId, fileName).replace('/', '_'),
-        )
+    ): File = AttachmentRepositoryImpl.stagedFileFor(context, AttachmentEntity.key(pageId, fileName))
 
     override fun close() {
         db.close()

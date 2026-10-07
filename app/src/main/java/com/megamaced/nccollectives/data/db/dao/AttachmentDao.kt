@@ -84,4 +84,19 @@ interface AttachmentDao {
 
     @Query("DELETE FROM attachments")
     suspend fun clear()
+
+    /**
+     * Point every staged row whose local URI starts with [oldPrefix] at
+     * [newPrefix] instead — the staging directory moved out of the cache.
+     * An exact prefix compare rather than LIKE, which would read `_` and
+     * `%` in a path as wildcards.
+     */
+    @Query(
+        "UPDATE attachments SET localUriString = :newPrefix || substr(localUriString, length(:oldPrefix) + 1) " +
+            "WHERE substr(localUriString, 1, length(:oldPrefix)) = :oldPrefix",
+    )
+    suspend fun repointLocalUris(
+        oldPrefix: String,
+        newPrefix: String,
+    ): Int
 }

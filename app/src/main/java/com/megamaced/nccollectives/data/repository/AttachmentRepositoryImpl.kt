@@ -26,6 +26,7 @@ import kotlinx.coroutines.flow.map
 import kotlinx.coroutines.withContext
 import timber.log.Timber
 import java.io.File
+import java.util.concurrent.atomic.AtomicBoolean
 import javax.inject.Inject
 import javax.inject.Singleton
 
@@ -214,7 +215,7 @@ class AttachmentRepositoryImpl
             sourceUri: Uri,
         ): File? =
             withContext(Dispatchers.IO) {
-                val dir = File(context.cacheDir, "attachments-pending").apply { mkdirs() }
+                val dir = stagingDir(context).apply { mkdirs() }
                 // Encode the file with the same key the DB row uses so the
                 // worker can find/delete it without an extra Room read.
                 val staged = File(dir, AttachmentEntity.key(pageId, resolvedName).replace('/', '_'))
@@ -297,6 +298,7 @@ class AttachmentRepositoryImpl
                 // to be rid of (issue #35).
                 return ApiResult.Unexpected(IllegalStateException("$fileName is being deleted"))
             }
+            moveLegacyStaging(context, attachmentDao)
             val staged = stagedFileFor(context, key)
             if (!staged.exists() || staged.length() == 0L) {
                 // Better to say so than to re-queue a row the worker will
@@ -632,8 +634,9 @@ class AttachmentRepositoryImpl
              * cascade wipe queued edits.
              */
             fun clearCachedFiles(context: Context) {
-                listOf("attachments-pending", "attachments-view", "attachments").forEach { name ->
-                    val dir = File(context.cacheDir, name)
+                val dirs = listOf(STAGING_DIR, "attachments-view", "attachments").map { File(context.cacheDir, it) } +
+                    stagingDir(context)
+                dirs.forEach { dir ->
                     if (dir.exists() && !dir.deleteRecursively()) {
                         Timber.w("Couldn't fully clear attachment cache dir %s", dir.absolutePath)
                     }
@@ -641,17 +644,62 @@ class AttachmentRepositoryImpl
             }
 
             /**
-             * Internal cache file backing a staged upload (B-29). Worker
-             * deletes this when the row reaches REMOTE / FAILED.
+             * File backing a staged upload (B-29). Worker deletes this when
+             * the row reaches REMOTE / FAILED.
              */
             fun stagedFileFor(
                 context: Context,
                 attachmentId: String,
-            ): File =
-                File(
-                    File(context.cacheDir, "attachments-pending"),
-                    attachmentId.replace('/', '_'),
-                )
+            ): File = File(stagingDir(context), attachmentId.replace('/', '_'))
+
+            /**
+             * Where staged upload bytes live: app-private, never backed up,
+             * and — unlike the cache directory they used to be in — never
+             * cleared by the system. They are the only copy of a picked or
+             * shared file until its upload lands, and the cache is cleared
+             * under storage pressure, typically while the app is in the
+             * background waiting for a network: exactly when a queued
+             * upload needs them.
+             */
+            private fun stagingDir(context: Context) = File(context.noBackupFilesDir, STAGING_DIR)
+
+            private val legacyMoveDone = AtomicBoolean(false)
+
+            /**
+             * Move bytes staged in the cache directory, by a version before
+             * [stagingDir] moved, to where [stagedFileFor] now looks, and
+             * repoint their rows. Once per process; the upload worker and
+             * Retry run it before they read anything staged.
+             */
+            suspend fun moveLegacyStaging(
+                context: Context,
+                attachmentDao: AttachmentDao,
+            ) {
+                if (!legacyMoveDone.compareAndSet(false, true)) return
+                withContext(Dispatchers.IO) {
+                    val legacy = File(context.cacheDir, STAGING_DIR)
+                    val files = legacy.listFiles() ?: return@withContext
+                    val target = stagingDir(context).apply { mkdirs() }
+                    for (file in files) {
+                        val moved = File(target, file.name)
+                        if (!moved.exists() && !file.renameTo(moved)) {
+                            Timber.w("Couldn't move staged upload %s out of the cache", file.name)
+                        }
+                    }
+                    attachmentDao.repointLocalUris(
+                        oldPrefix = Uri.fromFile(legacy).toString() + "/",
+                        newPrefix = Uri.fromFile(target).toString() + "/",
+                    )
+                    legacy.deleteRecursively()
+                }
+            }
+
+            /** Test hook: forget that [moveLegacyStaging] ran in this process. */
+            internal fun resetLegacyMoveForTest() {
+                legacyMoveDone.set(false)
+            }
+
+            private const val STAGING_DIR = "attachments-pending"
 
             /** Generic type Nextcloud falls back to when it can't tell. */
             private const val OCTET_STREAM = "application/octet-stream"
