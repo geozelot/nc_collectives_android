@@ -11,6 +11,7 @@ import com.megamaced.nccollectives.data.api.CollectivesApiService
 import com.megamaced.nccollectives.data.api.HostInterceptor
 import com.megamaced.nccollectives.data.api.PageBodyService
 import com.megamaced.nccollectives.data.auth.AccountGeneration
+import com.megamaced.nccollectives.data.auth.DavUserResolver
 import com.megamaced.nccollectives.data.auth.SessionManager
 import com.megamaced.nccollectives.data.auth.StoredCredentials
 import com.megamaced.nccollectives.data.auth.TokenStore
@@ -237,6 +238,9 @@ internal class IntegrationEnvironment private constructor(
                     host = server.url("/").toString().trimEnd('/'),
                     loginName = LOGIN_NAME,
                     appPassword = "app-password",
+                    // D12: known already, so the tests that aren't about it
+                    // don't see a `cloud/user` request first.
+                    davUserId = LOGIN_NAME,
                 )
             val sessionManager = mockk<SessionManager>(relaxed = true)
 
@@ -251,7 +255,8 @@ internal class IntegrationEnvironment private constructor(
                 ).build()
 
             val json = NetworkModule.provideJson()
-            val api = NetworkModule.provideCollectivesApi(NetworkModule.provideRetrofit(client, json))
+            val retrofit = NetworkModule.provideRetrofit(client, json)
+            val api = NetworkModule.provideCollectivesApi(retrofit)
             val db = Room
                 .inMemoryDatabaseBuilder(context, NcCollectivesDatabase::class.java)
                 .build()
@@ -264,7 +269,11 @@ internal class IntegrationEnvironment private constructor(
                 sessionManager = sessionManager,
                 client = client,
                 api = api,
-                bodyService = PageBodyService(client, tokenStore),
+                bodyService = PageBodyService(
+                    client,
+                    tokenStore,
+                    DavUserResolver(tokenStore, NetworkModule.provideCloudUserService(retrofit)),
+                ),
                 accountGeneration = AccountGeneration(),
                 syncScheduler = SyncScheduler(context, UserPreferences(context)),
             )

@@ -15,6 +15,12 @@ data class StoredCredentials(
     val host: String,
     val loginName: String,
     val appPassword: String,
+    /**
+     * D12: the user id WebDAV paths are built from, once the server has said
+     * what it is. Null until then; the login name stands in, which is the
+     * same on most servers.
+     */
+    val davUserId: String? = null,
 )
 
 /**
@@ -45,6 +51,7 @@ private data class PersistedAccount(
     val host: String,
     val loginName: String,
     val appPassword: String,
+    val davUserId: String? = null,
 )
 
 /**
@@ -187,7 +194,12 @@ class TokenStore
         /** Credentials for the active account, or null when signed out. */
         fun getCredentials(): StoredCredentials? =
             read().active?.let {
-                StoredCredentials(host = it.host, loginName = it.loginName, appPassword = it.appPassword)
+                StoredCredentials(
+                    host = it.host,
+                    loginName = it.loginName,
+                    appPassword = it.appPassword,
+                    davUserId = it.davUserId,
+                )
             }
 
         /** Every account on the device, oldest first, without their passwords. */
@@ -210,7 +222,6 @@ class TokenStore
             appPassword: String,
         ): String {
             val id = accountIdOf(host, loginName)
-            val entry = PersistedAccount(id = id, host = host, loginName = loginName, appPassword = appPassword)
             synchronized(storeLock) {
                 // A sign-in has to persist. When the store still won't open
                 // after `openPrefs`'s retries, whatever it holds is out of
@@ -222,10 +233,39 @@ class TokenStore
                     deletePrefsLocked()
                 }
                 val current = readLocked()
+                // D12: the same login at the same server is the same user, so
+                // a re-sign-in keeps the user id the server already gave.
+                val entry = PersistedAccount(
+                    id = id,
+                    host = host,
+                    loginName = loginName,
+                    appPassword = appPassword,
+                    davUserId = current.accounts.firstOrNull { it.id == id }?.davUserId,
+                )
                 val accounts = current.accounts.filterNot { it.id == id } + entry
                 writeLocked(AccountStore(accounts = accounts, activeId = id))
             }
             return id
+        }
+
+        /**
+         * D12: remember [davUserId] as the WebDAV user id of account
+         * [accountId]. Nothing changes when that account is no longer stored.
+         */
+        fun recordDavUserId(
+            accountId: String,
+            davUserId: String,
+        ) {
+            synchronized(storeLock) {
+                val current = readLocked()
+                val account = current.accounts.firstOrNull { it.id == accountId } ?: return
+                if (account.davUserId == davUserId) return
+                writeLocked(
+                    current.copy(
+                        accounts = current.accounts.map { if (it.id == accountId) it.copy(davUserId = davUserId) else it },
+                    ),
+                )
+            }
         }
 
         /**

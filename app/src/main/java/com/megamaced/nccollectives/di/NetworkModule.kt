@@ -3,6 +3,7 @@ package com.megamaced.nccollectives.di
 import com.megamaced.nccollectives.BuildConfig
 import com.megamaced.nccollectives.data.api.AuthInterceptor
 import com.megamaced.nccollectives.data.api.CirclesApiService
+import com.megamaced.nccollectives.data.api.CloudUserService
 import com.megamaced.nccollectives.data.api.CollectivesApiService
 import com.megamaced.nccollectives.data.api.DirectEditingService
 import com.megamaced.nccollectives.data.api.GitHubReleaseService
@@ -130,6 +131,10 @@ object NetworkModule {
     @Provides
     @Singleton
     fun provideServerStatusService(retrofit: Retrofit): ServerStatusService = retrofit.create(ServerStatusService::class.java)
+
+    @Provides
+    @Singleton
+    fun provideCloudUserService(retrofit: Retrofit): CloudUserService = retrofit.create(CloudUserService::class.java)
 
     /**
      * Separate OkHttp / Retrofit pair for the GitHub Releases API used by
