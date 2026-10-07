@@ -274,6 +274,17 @@ interface PageDao {
     @Query("SELECT id FROM pages WHERE collectiveId = :collectiveId")
     suspend fun idsForCollective(collectiveId: Long): List<Long>
 
+    /**
+     * B-104: the rows a listing requested at [before] can speak for. A row
+     * written since (a page created, or a rename's reissued id) is one the
+     * listing can't know about.
+     */
+    @Query("SELECT id FROM pages WHERE collectiveId = :collectiveId AND lastSyncedAt < :before")
+    suspend fun idsForCollectiveSyncedBefore(
+        collectiveId: Long,
+        before: Long,
+    ): List<Long>
+
     /** B-100: what `refresh` compares a listing against, without loading a single body. */
     @Query(
         "SELECT id, collectiveId, parentId, title, emoji, tagsCsv, subpageOrderCsv, isFullWidth, " +

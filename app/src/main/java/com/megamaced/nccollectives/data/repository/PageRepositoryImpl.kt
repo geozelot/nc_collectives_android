@@ -204,7 +204,12 @@ class PageRepositoryImpl
                     // added isn't mistaken for one going away. B-91: a page
                     // the listing omits is deleted only if nothing on it is
                     // unsynced; see [reconcilableDeletions].
-                    val unlisted = pageDao.idsForCollective(collectiveId).filterNot { it in listed }
+                    // B-104: and only rows older than the request. A page
+                    // created while the listing was in flight is written
+                    // with a later lastSyncedAt; deleting it on this
+                    // listing's say-so made a share into a new page look
+                    // failed, and the retry created a duplicate.
+                    val unlisted = pageDao.idsForCollectiveSyncedBefore(collectiveId, now).filterNot { it in listed }
                     val dropped = reconcilableDeletions(
                         unlisted = unlisted,
                         unsynced = pageDao.idsHoldingUnsyncedWork(collectiveId),
