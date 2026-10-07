@@ -182,6 +182,19 @@ class TokenStore
                 StoredCredentials(host = it.host, loginName = it.loginName, appPassword = it.appPassword)
             }
 
+        /**
+         * S-28: [id]'s credential, active or not. For revoking it on the
+         * server before it is forgotten here.
+         */
+        fun credentialsFor(id: String): StoredCredentials? =
+            read().accounts.firstOrNull { it.id == id }?.let {
+                StoredCredentials(host = it.host, loginName = it.loginName, appPassword = it.appPassword)
+            }
+
+        /** S-28: every stored credential, for sign-out's revocation. */
+        fun allCredentials(): List<StoredCredentials> =
+            read().accounts.map { StoredCredentials(host = it.host, loginName = it.loginName, appPassword = it.appPassword) }
+
         /** Every account on the device, oldest first, without their passwords. */
         fun accounts(): List<AccountSummary> = read().accounts.map { AccountSummary(id = it.id, host = it.host, loginName = it.loginName) }
 
