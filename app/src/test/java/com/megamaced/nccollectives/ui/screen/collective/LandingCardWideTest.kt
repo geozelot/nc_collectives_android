@@ -39,6 +39,7 @@ class LandingCardWideTest {
                     onToggleFavorite = { _, _ -> },
                     onAddSubpage = {},
                     onReorder = { _, _ -> },
+                    onMove = { _, _ -> },
                     onOpenMembers = {},
                     onRetryMembers = {},
                 )
