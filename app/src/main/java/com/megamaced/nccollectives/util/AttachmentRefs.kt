@@ -219,7 +219,7 @@ fun retargetAttachmentRefs(
         val bang = match.groups["bang"]?.value.orEmpty()
         val label = match.groups["label"]?.value.orEmpty()
         val trailing = match.groups["trailing"]?.value.orEmpty()
-        "$bang[$label](${target.replaceLastSegment(newName)}$trailing)"
+        "$bang[$label](${target.replaceLastSegment(attachmentLinkTarget(newName))}$trailing)"
     }
 }
 
@@ -345,3 +345,42 @@ private val FILE_EXTENSIONS = IMAGE_EXTENSIONS +
         "ics",
         "vcf",
     )
+
+/**
+ * U10: [fileName] as a markdown link *destination*.
+ *
+ * An attachment's name is the file's own name, so it can contain spaces and
+ * parentheses, and `![a b.jpg](a b.jpg)` isn't a link at all in CommonMark.
+ * A destination ends at the first space, and an unbalanced paren ends it
+ * early. The page then showed the raw text, and Nextcloud Text did the
+ * same. Percent-encoding is what Text writes itself, and [parseAttachmentRef]
+ * decodes it on the way back. `%` is encoded first so a literal one survives
+ * the round trip.
+ */
+fun attachmentLinkTarget(fileName: String): String =
+    buildString {
+        for (c in fileName) {
+            when {
+                c == '%' -> append("%25")
+                c == ' ' -> append("%20")
+                c == '(' -> append("%28")
+                c == ')' -> append("%29")
+                c == '<' -> append("%3C")
+                c == '>' -> append("%3E")
+                c.code < 0x20 || c.code == 0x7F -> append("%%%02X".format(c.code))
+                else -> append(c)
+            }
+        }
+    }
+
+/**
+ * U10: the markdown for an attachment link, an image embed when [image]. The
+ * label escapes the brackets that would end it.
+ */
+fun attachmentMarkdown(
+    fileName: String,
+    image: Boolean,
+): String {
+    val label = fileName.replace("\\", "\\\\").replace("[", "\\[").replace("]", "\\]")
+    return "${if (image) "!" else ""}[$label](${attachmentLinkTarget(fileName)})"
+}

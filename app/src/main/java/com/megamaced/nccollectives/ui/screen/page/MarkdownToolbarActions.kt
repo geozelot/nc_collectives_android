@@ -2,6 +2,7 @@ package com.megamaced.nccollectives.ui.screen.page
 
 import androidx.compose.ui.text.TextRange
 import androidx.compose.ui.text.input.TextFieldValue
+import com.megamaced.nccollectives.util.attachmentMarkdown
 import com.megamaced.nccollectives.util.isImageFileName
 
 /**
@@ -84,11 +85,7 @@ internal object MarkdownToolbarActions {
         val (min, max) = value.clampedSelection()
         val before = text.substring(0, min)
         val after = text.substring(max)
-        val snippet = if (isImageFileName(fileName)) {
-            "![$fileName]($fileName)"
-        } else {
-            "[$fileName]($fileName)"
-        }
+        val snippet = attachmentMarkdown(fileName, image = isImageFileName(fileName))
         val newText = before + snippet + after
         return value.copy(text = newText, selection = TextRange(min + snippet.length))
     }
