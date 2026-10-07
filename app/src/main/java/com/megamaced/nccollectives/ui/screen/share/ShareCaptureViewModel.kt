@@ -7,6 +7,7 @@ import com.megamaced.nccollectives.data.api.ApiResult
 import com.megamaced.nccollectives.data.api.userMessage
 import com.megamaced.nccollectives.domain.model.Collective
 import com.megamaced.nccollectives.domain.model.Page
+import com.megamaced.nccollectives.domain.model.PageListItem
 import com.megamaced.nccollectives.domain.model.SaveOutcome
 import com.megamaced.nccollectives.domain.repository.AttachmentRepository
 import com.megamaced.nccollectives.domain.repository.CollectiveRepository
@@ -106,8 +107,11 @@ class ShareCaptureViewModel
                 emptyList(),
             )
 
-        private val _pagesForCollective = MutableStateFlow<List<Page>>(emptyList())
-        val pagesForCollective: StateFlow<List<Page>> = _pagesForCollective.asStateFlow()
+        // List items, not pages: the picker draws a title and an emoji, and a
+        // `Page` carries its cached body — every one of them, for a whole
+        // collective, held for as long as this screen was open.
+        private val _pagesForCollective = MutableStateFlow<List<PageListItem>>(emptyList())
+        val pagesForCollective: StateFlow<List<PageListItem>> = _pagesForCollective.asStateFlow()
 
         private val _uiState = MutableStateFlow(ShareCaptureUiState())
         val uiState: StateFlow<ShareCaptureUiState> = _uiState.asStateFlow()
@@ -183,7 +187,7 @@ class ShareCaptureViewModel
             pagesJob?.cancel()
             pagesJob = viewModelScope.launch {
                 pageRepository.refresh(id)
-                pageRepository.observePages(id).collect { list ->
+                pageRepository.observePageList(id).collect { list ->
                     _pagesForCollective.value = list
                     val landing = list.firstOrNull { it.parentId == 0L }
                     if (_uiState.value.selectedParentPageId == null && landing != null) {

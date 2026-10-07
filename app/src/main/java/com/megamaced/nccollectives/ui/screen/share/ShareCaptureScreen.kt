@@ -16,7 +16,10 @@ import androidx.compose.foundation.layout.fillMaxWidth
 import androidx.compose.foundation.layout.height
 import androidx.compose.foundation.layout.padding
 import androidx.compose.foundation.layout.size
+import androidx.compose.foundation.lazy.LazyColumn
+import androidx.compose.foundation.lazy.LazyListScope
 import androidx.compose.foundation.lazy.LazyRow
+import androidx.compose.foundation.lazy.items
 import androidx.compose.foundation.lazy.itemsIndexed
 import androidx.compose.foundation.rememberScrollState
 import androidx.compose.foundation.shape.RoundedCornerShape
@@ -59,6 +62,7 @@ import androidx.lifecycle.compose.collectAsStateWithLifecycle
 import coil3.compose.AsyncImage
 import com.megamaced.nccollectives.domain.model.Collective
 import com.megamaced.nccollectives.domain.model.Page
+import com.megamaced.nccollectives.domain.model.PageListItem
 
 @OptIn(ExperimentalMaterial3Api::class)
 @Composable
@@ -114,36 +118,66 @@ internal fun ShareCaptureScreen(
                 windowInsets = WindowInsets(0, 0, 0, 0),
             )
         },
+        // The action and what it reports stay in view: they used to sit
+        // below the last page of the collective, which in a large one was a
+        // long scroll away.
+        bottomBar = {
+            if (ui.payload != null) {
+                Column(
+                    modifier = Modifier
+                        .fillMaxWidth()
+                        .padding(horizontal = 20.dp, vertical = 12.dp),
+                    verticalArrangement = Arrangement.spacedBy(8.dp),
+                ) {
+                    ui.errorMessage?.let { Text(it, color = MaterialTheme.colorScheme.error) }
+                    Button(
+                        onClick = viewModel::submit,
+                        enabled = !ui.isSaving &&
+                            ui.selectedCollectiveId != null &&
+                            (ui.mode == ShareMode.NEW_PAGE || ui.selectedAppendPageId != null),
+                        modifier = Modifier.fillMaxWidth(),
+                    ) {
+                        if (ui.isSaving) {
+                            CircularProgressIndicator(strokeWidth = 2.dp, modifier = Modifier.size(20.dp))
+                        } else {
+                            Text(if (ui.mode == ShareMode.NEW_PAGE) "Create page" else "Append")
+                        }
+                    }
+                }
+            }
+        },
     ) { scaffoldPadding ->
-        Column(
+        val payload = ui.payload
+        if (payload == null) {
+            Text(
+                text = "Nothing to share — return to the previous app and try again.",
+                style = MaterialTheme.typography.bodyMedium,
+                modifier = Modifier
+                    .padding(scaffoldPadding)
+                    .padding(20.dp),
+            )
+            return@Scaffold
+        }
+        // Lazy, so a collective of hundreds of pages composes the rows on
+        // screen rather than all of them.
+        LazyColumn(
             modifier = Modifier
                 .padding(scaffoldPadding)
-                .fillMaxSize()
-                .verticalScroll(rememberScrollState())
-                .padding(20.dp),
+                .fillMaxSize(),
+            contentPadding = PaddingValues(20.dp),
             verticalArrangement = Arrangement.spacedBy(16.dp),
         ) {
-            val payload = ui.payload
-            if (payload == null) {
-                Text(
-                    text = "Nothing to share — return to the previous app and try again.",
-                    style = MaterialTheme.typography.bodyMedium,
+            item { SharedContentPreview(payload, modifier = Modifier.fillMaxWidth()) }
+            item {
+                CollectivePicker(
+                    collectives = collectives,
+                    selectedId = ui.selectedCollectiveId,
+                    onSelect = viewModel::selectCollective,
                 )
-                return@Column
             }
-
-            SharedContentPreview(payload, modifier = Modifier.fillMaxWidth())
-
-            CollectivePicker(
-                collectives = collectives,
-                selectedId = ui.selectedCollectiveId,
-                onSelect = viewModel::selectCollective,
-            )
-
-            ModeToggle(mode = ui.mode, onChange = viewModel::setMode)
-
+            item { ModeToggle(mode = ui.mode, onChange = viewModel::setMode) }
             when (ui.mode) {
-                ShareMode.NEW_PAGE -> NewPageSection(
+                ShareMode.NEW_PAGE -> newPageSection(
                     title = ui.title,
                     onTitleChange = viewModel::setTitle,
                     pages = pages,
@@ -151,28 +185,11 @@ internal fun ShareCaptureScreen(
                     onParentChange = viewModel::selectParent,
                 )
 
-                ShareMode.APPEND -> AppendSection(
+                ShareMode.APPEND -> appendSection(
                     pages = pages,
                     selectedPageId = ui.selectedAppendPageId,
                     onSelect = viewModel::selectAppendTarget,
                 )
-            }
-
-            ui.errorMessage?.let { Text(it, color = MaterialTheme.colorScheme.error) }
-
-            Spacer(Modifier.height(8.dp))
-            Button(
-                onClick = viewModel::submit,
-                enabled = !ui.isSaving &&
-                    ui.selectedCollectiveId != null &&
-                    (ui.mode == ShareMode.NEW_PAGE || ui.selectedAppendPageId != null),
-                modifier = Modifier.fillMaxWidth(),
-            ) {
-                if (ui.isSaving) {
-                    CircularProgressIndicator(strokeWidth = 2.dp, modifier = Modifier.size(20.dp))
-                } else {
-                    Text(if (ui.mode == ShareMode.NEW_PAGE) "Create page" else "Append")
-                }
             }
         }
     }
@@ -269,31 +286,34 @@ private fun ModeToggle(
     }
 }
 
-@Composable
-private fun NewPageSection(
+private fun LazyListScope.newPageSection(
     title: String,
     onTitleChange: (String) -> Unit,
-    pages: List<Page>,
+    pages: List<PageListItem>,
     selectedParentId: Long?,
     onParentChange: (Long) -> Unit,
 ) {
-    OutlinedTextField(
-        value = title,
-        onValueChange = onTitleChange,
-        label = { Text("Page title") },
-        modifier = Modifier.fillMaxWidth(),
-        singleLine = true,
-    )
-    Text("Parent page", style = MaterialTheme.typography.labelMedium)
-    HorizontalDivider()
-    if (pages.isEmpty()) {
-        Text(
-            text = "No pages in this collective yet.",
-            style = MaterialTheme.typography.bodyMedium,
-            color = MaterialTheme.colorScheme.onSurfaceVariant,
+    item {
+        OutlinedTextField(
+            value = title,
+            onValueChange = onTitleChange,
+            label = { Text("Page title") },
+            modifier = Modifier.fillMaxWidth(),
+            singleLine = true,
         )
+    }
+    item { Text("Parent page", style = MaterialTheme.typography.labelMedium) }
+    item { HorizontalDivider() }
+    if (pages.isEmpty()) {
+        item {
+            Text(
+                text = "No pages in this collective yet.",
+                style = MaterialTheme.typography.bodyMedium,
+                color = MaterialTheme.colorScheme.onSurfaceVariant,
+            )
+        }
     } else {
-        pages.forEach { page ->
+        items(pages, key = { it.id }) { page ->
             // Any page is a valid parent — the server promotes a leaf
             // parent to a folder when it gains a child (Batch 18h).
             PageSelectableRow(
@@ -305,20 +325,21 @@ private fun NewPageSection(
     }
 }
 
-@Composable
-private fun AppendSection(
-    pages: List<Page>,
+private fun LazyListScope.appendSection(
+    pages: List<PageListItem>,
     selectedPageId: Long?,
     onSelect: (Long) -> Unit,
 ) {
-    Text("Append to", style = MaterialTheme.typography.labelMedium)
-    HorizontalDivider()
+    item { Text("Append to", style = MaterialTheme.typography.labelMedium) }
+    item { HorizontalDivider() }
     if (pages.isEmpty()) {
-        Box(modifier = Modifier.fillMaxWidth().padding(16.dp), contentAlignment = Alignment.Center) {
-            CircularProgressIndicator()
+        item {
+            Box(modifier = Modifier.fillMaxWidth().padding(16.dp), contentAlignment = Alignment.Center) {
+                CircularProgressIndicator()
+            }
         }
     } else {
-        pages.forEach { page ->
+        items(pages, key = { it.id }) { page ->
             PageSelectableRow(
                 page = page,
                 selected = page.id == selectedPageId,
@@ -330,7 +351,7 @@ private fun AppendSection(
 
 @Composable
 private fun PageSelectableRow(
-    page: Page,
+    page: PageListItem,
     selected: Boolean,
     onClick: () -> Unit,
 ) {
