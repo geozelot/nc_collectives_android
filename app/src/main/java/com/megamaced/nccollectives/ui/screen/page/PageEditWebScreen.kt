@@ -691,7 +691,9 @@ private class StripChromeWebViewClient(
         handler: SslErrorHandler?,
         error: SslError?,
     ) {
-        Timber.tag(TAG).w("SSL error from WebView: %s", error)
+        // S9: the error's string form includes the URL, whose one-shot
+        // session token must not reach logcat.
+        Timber.tag(TAG).w("SSL error %d from WebView for host %s", error?.primaryError, error?.url?.toUri()?.host)
         handler?.cancel()
         onSslError()
     }

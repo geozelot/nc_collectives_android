@@ -4,6 +4,7 @@ import kotlinx.coroutines.Dispatchers
 import kotlinx.coroutines.delay
 import kotlinx.coroutines.withContext
 import kotlinx.serialization.Serializable
+import kotlinx.serialization.SerializationException
 import kotlinx.serialization.json.Json
 import okhttp3.FormBody
 import okhttp3.HttpUrl.Companion.toHttpUrlOrNull
@@ -94,8 +95,10 @@ class NextcloudLoginFlow
                         Result.success(initResponse)
                     }
                 } catch (e: Exception) {
-                    Timber.e(e, "Login flow initiation failed")
-                    Result.failure(LoginFlowException("Failed to connect: ${e.message}", e))
+                    // S9: the class, not the exception. A reply the parser
+                    // choked on is quoted in its message, poll token and all.
+                    Timber.e("Login flow initiation failed: %s", e.javaClass.simpleName)
+                    Result.failure(LoginFlowException("Failed to connect: ${loginFailureDetail(e)}", e))
                 }
             }
 
@@ -158,7 +161,8 @@ class NextcloudLoginFlow
                             }
                         }
                     } catch (e: Exception) {
-                        Timber.w(e, "Poll attempt failed")
+                        // S9: a successful poll's reply is the app password.
+                        Timber.w("Poll attempt failed: %s", e.javaClass.simpleName)
                     } finally {
                         call.cancel()
                     }
@@ -233,3 +237,14 @@ class LoginFlowException(
     message: String,
     cause: Throwable? = null,
 ) : Exception(message, cause)
+
+/**
+ * S9: what a failed Login Flow request may say about why. A parse failure's
+ * message quotes the reply, which carries the poll token, so it is never
+ * passed on; connection errors say nothing secret.
+ */
+internal fun loginFailureDetail(e: Exception): String =
+    when (e) {
+        is SerializationException -> "the server's reply couldn't be read"
+        else -> e.message ?: e.javaClass.simpleName
+    }

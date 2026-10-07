@@ -353,7 +353,9 @@ class TokenStore
             } catch (e: Exception) {
                 // S4: signed out, but not deleted — a read is no reason to
                 // destroy anything. The next sign-in overwrites the blob.
-                Timber.w(e, "Reading credentials failed; signed out until the next sign-in")
+                // S9: the class, not the exception: a decode failure's
+                // message quotes the decrypted JSON, app passwords included.
+                Timber.w("Reading credentials failed (%s); signed out until the next sign-in", e.javaClass.simpleName)
                 AccountStore()
             }
         }
