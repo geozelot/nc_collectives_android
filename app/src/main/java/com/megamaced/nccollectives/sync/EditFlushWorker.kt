@@ -8,6 +8,8 @@ import androidx.work.WorkerParameters
 import com.megamaced.nccollectives.data.api.ApiResult
 import com.megamaced.nccollectives.data.api.PageBodyService
 import com.megamaced.nccollectives.data.auth.AccountGeneration
+import com.megamaced.nccollectives.data.auth.AuthState
+import com.megamaced.nccollectives.data.auth.SessionManager
 import com.megamaced.nccollectives.data.db.NcCollectivesDatabase
 import com.megamaced.nccollectives.data.db.dao.EditQueueDao
 import com.megamaced.nccollectives.data.db.dao.PageDao
@@ -51,8 +53,12 @@ class EditFlushWorker
         private val bodyService: PageBodyService,
         private val database: NcCollectivesDatabase,
         private val accountGeneration: AccountGeneration,
+        private val sessionManager: SessionManager,
     ) : CoroutineWorker(appContext, params) {
         override suspend fun doWork(): Result {
+            // B-105: see SyncWorker. The rows stay queued for the session
+            // that owns them; a later run sends them.
+            if (sessionManager.authState.value != AuthState.Authenticated) return Result.success()
             // Issue #20: the account this run's writes belong to. Compared
             // inside the transaction that settles each row, because
             // `recordPutOutcome` runs `NonCancellable` — cancelling this
