@@ -1,0 +1,94 @@
+name: fork-release
+
+# Signed builds of the fork, published to GitHub Releases for Obtainium.
+# Triggered by a `fork-v*` tag (e.g. fork-v2.12.1-1), which never collides
+# with upstream's `v*` tags and their F-Droid checks.
+on:
+  push:
+    tags: ['fork-v*']
+
+permissions:
+  contents: read
+
+jobs:
+  release:
+    if: github.repository == 'geozelot/nc_collectives_android'
+    runs-on: ubuntu-latest
+    timeout-minutes: 45
+    # The signing secrets live in this environment only. Restrict it to
+    # fork-v* tags (and optionally require yourself as reviewer) under
+    # Settings → Environments → release.
+    environment: release
+    permissions:
+      contents: write
+    steps:
+      - uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7.0.1
+        with:
+          persist-credentials: false
+
+      - uses: actions/setup-java@de7274f081f381c8f8158605e0321c36c376e2e6 # v6.0.1
+        with:
+          distribution: temurin
+          java-version: '21'
+
+      # No cache: a release reads nothing an earlier run wrote.
+      - uses: gradle/actions/setup-gradle@3f5f9adaf7d9fecd50b5935e54106014257a94e6 # v6.4.0
+        with:
+          cache-disabled: true
+
+      - name: Unit tests
+        run: ./gradlew --no-daemon testDebugUnitTest
+
+      - name: Build and sign the release APK
+        env:
+          KEYSTORE_BASE64: ${{ secrets.ANDROID_RELEASE_KEYSTORE_BASE64 }}
+          ANDROID_RELEASE_STORE_PASSWORD: ${{ secrets.ANDROID_RELEASE_STORE_PASSWORD }}
+          ANDROID_RELEASE_KEY_ALIAS: ${{ secrets.ANDROID_RELEASE_KEY_ALIAS }}
+          ANDROID_RELEASE_KEY_PASSWORD: ${{ secrets.ANDROID_RELEASE_KEY_PASSWORD }}
+        run: |
+          missing=""
+          [ -n "$KEYSTORE_BASE64" ] || missing="$missing ANDROID_RELEASE_KEYSTORE_BASE64"
+          [ -n "$ANDROID_RELEASE_STORE_PASSWORD" ] || missing="$missing ANDROID_RELEASE_STORE_PASSWORD"
+          [ -n "$ANDROID_RELEASE_KEY_ALIAS" ] || missing="$missing ANDROID_RELEASE_KEY_ALIAS"
+          [ -n "$ANDROID_RELEASE_KEY_PASSWORD" ] || missing="$missing ANDROID_RELEASE_KEY_PASSWORD"
+          if [ -n "$missing" ]; then
+            echo "::error::these secrets of the release environment are unset:$missing"
+            exit 1
+          fi
+          keystore="$RUNNER_TEMP/release.keystore"
+          trap 'rm -f "$keystore"' EXIT
+          echo "$KEYSTORE_BASE64" | base64 -d > "$keystore"
+          unset KEYSTORE_BASE64
+          ANDROID_RELEASE_KEYSTORE_FILE="$keystore" ./gradlew --no-daemon assembleRelease
+
+      # Signed, and -- once RELEASE_CERT_SHA256 is set as an environment
+      # variable -- by the expected key, so a swapped secret can't publish
+      # an APK that won't update the installed one.
+      - name: Verify the signature
+        env:
+          EXPECTED_CERT: ${{ vars.RELEASE_CERT_SHA256 }}
+        run: |
+          apk=app/build/outputs/apk/release/app-release.apk
+          if [ ! -f "$apk" ]; then
+            echo "::error::the release build was not signed."
+            exit 1
+          fi
+          apksigner="$(ls -d "$ANDROID_HOME"/build-tools/*/ | sort -V | tail -1)apksigner"
+          actual="$("$apksigner" verify --print-certs "$apk" | sed -n 's/.*certificate SHA-256 digest: *//p' | sort -u)"
+          echo "Signing certificate SHA-256: $actual"
+          if [ -n "$EXPECTED_CERT" ] && [ "$actual" != "$EXPECTED_CERT" ]; then
+            echo "::error::signed with '$actual', expected '$EXPECTED_CERT'."
+            exit 1
+          fi
+
+      - name: Publish the GitHub release
+        env:
+          GH_TOKEN: ${{ github.token }}
+          TAG: ${{ github.ref_name }}
+        run: |
+          name="nc-collectives-geozelot-${TAG#fork-}.apk"
+          cp app/build/outputs/apk/release/app-release.apk "$RUNNER_TEMP/$name"
+          gh release create "$TAG" "$RUNNER_TEMP/$name" \
+            --repo "$GITHUB_REPOSITORY" \
+            --title "$TAG" \
+            --generate-notes

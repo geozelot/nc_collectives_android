@@ -1,0 +1,55 @@
+name: fork-ci
+
+# The fork's own checks, on its own branches. Upstream's build.yml stays as
+# upstream wrote it (it triggers on main and v* tags), so merges from upstream
+# never conflict here.
+on:
+  push:
+    branches: [dev]
+  pull_request:
+    branches: [dev]
+
+permissions:
+  contents: read
+
+concurrency:
+  group: ${{ github.workflow }}-${{ github.ref }}
+  cancel-in-progress: ${{ github.event_name == 'pull_request' }}
+
+jobs:
+  build:
+    # Never in a fork of this fork.
+    if: github.repository == 'geozelot/nc_collectives_android'
+    runs-on: ubuntu-latest
+    timeout-minutes: 45
+    steps:
+      - uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7.0.1
+        with:
+          persist-credentials: false
+
+      - uses: actions/setup-java@de7274f081f381c8f8158605e0321c36c376e2e6 # v6.0.1
+        with:
+          distribution: temurin
+          java-version: '21'
+
+      - uses: gradle/actions/setup-gradle@3f5f9adaf7d9fecd50b5935e54106014257a94e6 # v6.4.0
+        with:
+          cache-read-only: ${{ github.event_name == 'pull_request' }}
+
+      # No signing material in this job. assembleRelease is unsigned here, and
+      # still runs R8 on every change.
+      - name: Build
+        run: >
+          ./gradlew --no-daemon
+          ktlintCheck
+          lintDebug
+          testDebugUnitTest
+          assembleDebug assembleRelease
+
+      - name: Upload debug APK
+        uses: actions/upload-artifact@043fb46d1a93c77aae656e7c1c64a875d1fc6a0a # v7.0.1
+        with:
+          name: fork-debug-${{ github.sha }}
+          path: app/build/outputs/apk/debug/*.apk
+          if-no-files-found: error
+          retention-days: 14
