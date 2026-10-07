@@ -8,6 +8,7 @@ import com.megamaced.nccollectives.data.auth.LoginFlowStatus
 import com.megamaced.nccollectives.data.auth.NextcloudLoginFlow
 import com.megamaced.nccollectives.data.auth.isSameServerHttpsUrl
 import dagger.hilt.android.lifecycle.HiltViewModel
+import kotlinx.coroutines.Job
 import kotlinx.coroutines.flow.MutableStateFlow
 import kotlinx.coroutines.flow.StateFlow
 import kotlinx.coroutines.flow.asStateFlow
@@ -72,7 +73,7 @@ class LoginViewModel
                     onSuccess = { initResponse -> onFlowInitiated(initResponse, normalisedHost) },
                     onFailure = { e ->
                         _uiState.update {
-                            it.copy(isLoading = false, error = e.message ?: "Connection failed")
+                            it.copy(isLoading = false, error = loginFailureMessage(e))
                         }
                     },
                 )
@@ -109,7 +110,8 @@ class LoginViewModel
                 )
             }
 
-            viewModelScope.launch {
+            pollJob?.cancel()
+            pollJob = viewModelScope.launch {
                 // S-17: pass `expectedHost` so a server returning a different
                 // canonical host than the user typed gets rejected before its
                 // credentials are persisted.
@@ -143,7 +145,68 @@ class LoginViewModel
             }
         }
 
+        /** U16: the poll that waits for the browser sign-in, while one runs. */
+        private var pollJob: Job? = null
+
+        /**
+         * U16: the sign-in page is open, so stop offering it. `loginUrl` used
+         * to stay set, and the screen's effect re-opened the browser tab
+         * whenever it re-ran: on every activity recreation, and on returning
+         * to the screen.
+         */
+        fun onLoginPageOpened() {
+            _uiState.update { it.copy(loginUrl = null) }
+        }
+
+        /**
+         * U16: give up waiting for the browser. Closing the browser left the
+         * poll running for its full five minutes with both buttons disabled.
+         * If the user finishes signing in in the browser after this, the
+         * server issues an app password this device never collects. It shows
+         * in their Devices & sessions list and can be revoked there, which is
+         * the lesser cost.
+         */
+        fun cancelLogin() {
+            pollJob?.cancel()
+            pollJob = null
+            _uiState.update { it.copy(isPolling = false, isLoading = false, loginUrl = null) }
+        }
+
         fun dismissError() {
             _uiState.update { it.copy(error = null) }
         }
     }
+
+/**
+ * U16: what a failed sign-in start means, in words. The exception's own
+ * message ("Failed to connect: Unable to resolve host …", a Kotlin
+ * serialization error) used to be shown as it was.
+ */
+internal fun loginFailureMessage(error: Throwable): String {
+    val causes = generateSequence(error) { it.cause }.toList()
+    return when {
+        causes.any { it is java.net.UnknownHostException } -> {
+            "Can't find a server at that address. Check it, and your connection."
+        }
+
+        causes.any { it is javax.net.ssl.SSLException || it is java.security.cert.CertificateException } -> {
+            "The server's certificate couldn't be verified."
+        }
+
+        causes.any { it is java.net.SocketTimeoutException || it is java.net.ConnectException } -> {
+            "The server didn't answer. Check the address and your connection."
+        }
+
+        causes.any { it is kotlinx.serialization.SerializationException } -> {
+            "That address didn't answer like a Nextcloud server."
+        }
+
+        error.message?.startsWith("Server returned ") == true -> {
+            "That address didn't offer a Nextcloud sign-in (${error.message?.removePrefix("Server returned ")})."
+        }
+
+        else -> {
+            "Couldn't reach the server."
+        }
+    }
+}

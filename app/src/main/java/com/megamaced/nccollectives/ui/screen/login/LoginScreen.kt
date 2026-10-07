@@ -59,7 +59,10 @@ fun LoginScreen(
     val snackbarHostState = remember { SnackbarHostState() }
 
     LaunchedEffect(uiState.loginUrl) {
-        uiState.loginUrl?.let { url -> launchCustomTab(context, url) }
+        uiState.loginUrl?.let { url ->
+            launchCustomTab(context, url)
+            viewModel.onLoginPageOpened()
+        }
     }
 
     SnackbarStatusEffect(uiState.error, snackbarHostState, viewModel::dismissError)
@@ -136,6 +139,10 @@ fun LoginScreen(
                     style = MaterialTheme.typography.bodyMedium,
                     color = MaterialTheme.colorScheme.onSurfaceVariant,
                 )
+                // U16: a way out if the browser was closed before signing in.
+                TextButton(onClick = viewModel::cancelLogin) {
+                    Text("Stop waiting")
+                }
             }
 
             if (onCancel != null) {
