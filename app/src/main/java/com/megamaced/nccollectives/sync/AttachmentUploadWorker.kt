@@ -78,6 +78,9 @@ class AttachmentUploadWorker
             // it would hand the incoming account an attachment row, and a
             // readable file, belonging to the outgoing one.
             val generation = accountGeneration.current()
+            // Bytes staged by an older version are in the cache directory;
+            // move them to where `stagedFileFor` looks before reading rows.
+            AttachmentRepositoryImpl.moveLegacyStaging(appContext, attachmentDao)
             val pending = attachmentDao.pendingUploads()
             if (pending.isEmpty()) return Result.success()
 
