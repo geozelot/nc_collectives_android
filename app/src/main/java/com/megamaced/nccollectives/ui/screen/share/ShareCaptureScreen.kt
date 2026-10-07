@@ -1,5 +1,6 @@
 package com.megamaced.nccollectives.ui.screen.share
 
+import android.widget.Toast
 import androidx.compose.foundation.background
 import androidx.compose.foundation.layout.Arrangement
 import androidx.compose.foundation.layout.Box
@@ -50,6 +51,7 @@ import androidx.compose.ui.Alignment
 import androidx.compose.ui.Modifier
 import androidx.compose.ui.draw.clip
 import androidx.compose.ui.graphics.Color
+import androidx.compose.ui.platform.LocalContext
 import androidx.compose.ui.unit.dp
 import androidx.hilt.navigation.compose.hiltViewModel
 import androidx.lifecycle.compose.collectAsStateWithLifecycle
@@ -75,8 +77,17 @@ internal fun ShareCaptureScreen(
         }
     }
 
+    val context = LocalContext.current
     LaunchedEffect(ui.finished) {
-        if (ui.finished) onDismiss()
+        if (ui.finished) {
+            // U9: the report used to go only into this screen's own text,
+            // which left with the screen in the same frame. "Saved as X —
+            // 2 images couldn't be read" was composed and never seen, and a
+            // partial capture looked like a clean one. A toast outlives the
+            // dismissal.
+            ui.finishedMessage?.let { Toast.makeText(context, it, Toast.LENGTH_LONG).show() }
+            onDismiss()
+        }
     }
 
     Scaffold(
@@ -139,7 +150,6 @@ internal fun ShareCaptureScreen(
             }
 
             ui.errorMessage?.let { Text(it, color = MaterialTheme.colorScheme.error) }
-            ui.finishedMessage?.takeIf { ui.finished }?.let { Text(it) }
 
             Spacer(Modifier.height(8.dp))
             Button(
