@@ -32,6 +32,7 @@ import androidx.compose.ui.Modifier
 import androidx.compose.ui.semantics.Role
 import androidx.compose.ui.text.input.ImeAction
 import androidx.compose.ui.unit.dp
+import java.text.BreakIterator
 
 /**
  * Minimal emoji picker: a grid of popular pages-relevant emojis plus a free
@@ -82,11 +83,8 @@ fun EmojiPickerSheet(
                 // B-48: previously `it.take(8)` truncated by UTF-16 code
                 // unit, splitting compound emoji (e.g. 👨‍👩‍👧‍👦 is 11 code
                 // units) into invalid surrogate halves and rendering as
-                // tofu. The field is single-line and the picker only
-                // ever uses the first character anyway — drop the cap
-                // entirely. Worst case the user pastes a paragraph; the
-                // page header would still render the leading emoji and
-                // the rest is silently ignored.
+                // tofu. No cap on what can be typed; what is *sent* is the
+                // first character, by grapheme (see [firstGrapheme]).
                 onValueChange = { custom = it },
                 label = { Text("Custom emoji") },
                 placeholder = { Text("Paste or type any emoji") },
@@ -100,9 +98,10 @@ fun EmojiPickerSheet(
                 horizontalArrangement = Arrangement.End,
             ) {
                 TextButton(onClick = { onPick("") }) { Text("Clear") }
+                val picked = firstGrapheme(custom)
                 TextButton(
-                    enabled = custom.isNotBlank(),
-                    onClick = { onPick(custom.trim()) },
+                    enabled = picked != null,
+                    onClick = { picked?.let(onPick) },
                 ) { Text("Apply") }
             }
         }
@@ -162,3 +161,19 @@ private val POPULAR_EMOJIS = listOf(
     "🤖",
     "🐰",
 )
+
+/**
+ * The first user-perceived character of [text], or null when there is
+ * only space. A grapheme, not a code point: a family, a flag or a
+ * skin-toned emoji is several code points and stays whole.
+ *
+ * The field used to send whatever it held — a pasted paragraph became the
+ * page's emoji on the server, and every list showed it.
+ */
+internal fun firstGrapheme(text: String): String? {
+    val trimmed = text.trim()
+    if (trimmed.isEmpty()) return null
+    val breaks = BreakIterator.getCharacterInstance()
+    breaks.setText(trimmed)
+    return trimmed.substring(0, breaks.next())
+}
