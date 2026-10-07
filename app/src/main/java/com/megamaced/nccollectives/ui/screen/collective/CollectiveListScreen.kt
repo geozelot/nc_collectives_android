@@ -135,7 +135,10 @@ internal fun CollectiveListScreen(
         snackbarHost = { SnackbarHost(snackbarHostState) { Snackbar(snackbarData = it) } },
     ) { scaffoldPadding ->
         PullToRefreshBox(
-            isRefreshing = ui.isRefreshing,
+            // One spinner on a first load: with nothing to show, the
+            // full-screen loading state below already says so, and the pull
+            // indicator drew a second one over it.
+            isRefreshing = ui.isRefreshing && collectives.isNotEmpty(),
             onRefresh = viewModel::refresh,
             modifier = Modifier.padding(scaffoldPadding).fillMaxSize(),
         ) {
