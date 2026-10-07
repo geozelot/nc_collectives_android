@@ -69,6 +69,7 @@ import com.megamaced.nccollectives.ui.attachment.openAttachmentExternally
 import com.megamaced.nccollectives.ui.attachment.rememberCameraCapture
 import com.megamaced.nccollectives.ui.attachment.uriDisplayName
 import com.megamaced.nccollectives.ui.components.EmptyState
+import com.megamaced.nccollectives.ui.components.RefuseObscuredTouches
 import com.megamaced.nccollectives.ui.components.SnackbarStatusEffect
 
 @OptIn(ExperimentalMaterial3Api::class)
@@ -230,6 +231,7 @@ internal fun AttachmentsScreen(
             title = { Text("Delete attachment?") },
             text = { Text("\"$name\" will be removed from the page.") },
             confirmButton = {
+                RefuseObscuredTouches()
                 TextButton(onClick = {
                     viewModel.delete(name)
                     pendingDelete = null

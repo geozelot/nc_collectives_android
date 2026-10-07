@@ -26,8 +26,17 @@
         android:networkSecurityConfig="@xml/network_security_config"
         android:roundIcon="@mipmap/ic_launcher_round"
         android:supportsRtl="true"
+        android:taskAffinity=""
         android:theme="@style/Theme.NcCollectives"
         tools:targetApi="36">
+
+        <!--
+            S9: taskAffinity="" above. By default every activity's affinity is
+            the package name, and on Android 10 and 11 another app declaring
+            that affinity could slip its own activity into this app's task
+            (task hijacking, "StrandHogg") and be shown as this app — over the
+            login screen, say. With no affinity, nothing can claim this task.
+        -->
 
         <activity
             android:name=".MainActivity"

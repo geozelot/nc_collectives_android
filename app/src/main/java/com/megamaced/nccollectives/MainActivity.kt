@@ -29,6 +29,11 @@ class MainActivity : ComponentActivity() {
         installSplashScreen()
         enableEdgeToEdge()
         super.onCreate(savedInstanceState)
+        // S9: drop touches that arrive through another app's window drawn
+        // over this one (tapjacking). Android 12 does this itself for
+        // untrusted overlays; Android 10 and 11 don't. Dialogs are their own
+        // windows and guard themselves (`RefuseObscuredTouches`).
+        window.decorView.filterTouchesWhenObscured = true
         // B-74: only a fresh start may publish. This activity is
         // `singleTask`, so a share intent stays its current intent
         // indefinitely — an unconditional publish here re-published a payload

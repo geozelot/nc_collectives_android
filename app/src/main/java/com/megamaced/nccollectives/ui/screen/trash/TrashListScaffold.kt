@@ -41,6 +41,7 @@ import androidx.compose.ui.graphics.Color
 import androidx.compose.ui.unit.dp
 import com.megamaced.nccollectives.ui.components.EmptyState
 import com.megamaced.nccollectives.ui.components.ListStateSwitch
+import com.megamaced.nccollectives.ui.components.RefuseObscuredTouches
 import com.megamaced.nccollectives.ui.components.SnackbarStatusEffect
 
 /**
@@ -129,6 +130,7 @@ internal fun <T> TrashListScaffold(
             title = { Text(purgeTitle(item)) },
             text = { Text(purgeMessage(item)) },
             confirmButton = {
+                RefuseObscuredTouches()
                 TextButton(onClick = {
                     onPurge(item)
                     pendingPurge = null
