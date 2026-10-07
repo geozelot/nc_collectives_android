@@ -8,6 +8,7 @@ import kotlinx.coroutines.test.StandardTestDispatcher
 import kotlinx.coroutines.test.TestScope
 import kotlinx.coroutines.test.advanceUntilIdle
 import kotlinx.coroutines.test.resetMain
+import kotlinx.coroutines.test.runCurrent
 import kotlinx.coroutines.test.runTest
 import kotlinx.coroutines.test.setMain
 import org.junit.After
@@ -50,8 +51,12 @@ private class FakeRemoteList : RemoteListViewModel<Row>() {
         return loadResult
     }
 
+    /** When set, a restore waits on it — the request is "in flight" until it completes. */
+    var restoreGate: kotlinx.coroutines.CompletableDeferred<Unit>? = null
+
     override suspend fun restoreItem(id: Long): ApiResult<Unit> {
         restored += id
+        restoreGate?.await()
         return restoreResult
     }
 
@@ -273,4 +278,20 @@ class RemoteListViewModelTest {
         advanceUntilIdle()
         return viewModel
     }
+
+    @Test
+    fun aSecondTapWhileTheFirstRestoreIsInFlight_sendsNothing() =
+        runTest(dispatcher) {
+            val viewModel = FakeRemoteList()
+            viewModel.restoreGate = kotlinx.coroutines.CompletableDeferred()
+
+            viewModel.restore(1L)
+            runCurrent()
+            viewModel.restore(1L)
+            runCurrent()
+
+            assertEquals("one request, not two", listOf(1L), viewModel.restored)
+            viewModel.restoreGate!!.complete(Unit)
+            advanceUntilIdle()
+        }
 }

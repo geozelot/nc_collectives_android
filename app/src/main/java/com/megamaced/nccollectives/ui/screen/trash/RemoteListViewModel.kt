@@ -44,6 +44,9 @@ data class RemoteListUiState<T>(
  */
 abstract class RemoteListViewModel<T> : ViewModel() {
     private val _uiState = MutableStateFlow(RemoteListUiState<T>())
+
+    /** Rows with a restore or purge out. Touched on the main thread only. */
+    private val inFlight = mutableSetOf<Long>()
     val uiState: StateFlow<RemoteListUiState<T>> = _uiState.asStateFlow()
 
     /** Identity used to drop a restored or purged row from the snapshot. */
@@ -96,17 +99,26 @@ abstract class RemoteListViewModel<T> : ViewModel() {
         successMessage: String,
         action: suspend (Long) -> ApiResult<Unit>,
     ) {
+        // One request per row at a time. A second tap while the first was
+        // out — on Restore, or Restore and then Delete — sent a second
+        // request: a duplicate restore, or a purge of the page the restore
+        // was bringing back.
+        if (!inFlight.add(id)) return
         viewModelScope.launch {
-            val result = action(id)
-            if (result is ApiResult.Success) {
-                _uiState.update { state ->
-                    state.copy(
-                        statusMessage = successMessage,
-                        items = state.items.filter { idOf(it) != id },
-                    )
+            try {
+                val result = action(id)
+                if (result is ApiResult.Success) {
+                    _uiState.update { state ->
+                        state.copy(
+                            statusMessage = successMessage,
+                            items = state.items.filter { idOf(it) != id },
+                        )
+                    }
+                } else {
+                    _uiState.update { it.copy(statusMessage = result.userMessage()) }
                 }
-            } else {
-                _uiState.update { it.copy(statusMessage = result.userMessage()) }
+            } finally {
+                inFlight.remove(id)
             }
         }
     }
