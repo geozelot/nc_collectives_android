@@ -18,6 +18,9 @@ interface PageRepository {
      */
     fun observePageList(collectiveId: Long): Flow<List<PageListItem>>
 
+    /** U15: whether [pageId] has an edit queued that the server hasn't taken yet. */
+    fun observeHasQueuedEdit(pageId: Long): Flow<Boolean>
+
     /**
      * Every non-trashed page in [collectiveId] as full [Page]s, same order
      * as [observePageList].

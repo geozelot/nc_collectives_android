@@ -100,6 +100,7 @@ internal fun PageViewScreen(
     var showRenameDialog by remember { mutableStateOf(false) }
     var showMoveSheet by remember { mutableStateOf(false) }
     var showTrashConfirm by remember { mutableStateOf(false) }
+    val unsyncedWork by viewModel.unsyncedWorkCount.collectAsStateWithLifecycle()
     var showOutline by remember { mutableStateOf(false) }
     // B-76: disables the Edit button for the duration of the route lookup.
     var resolvingEditRoute by remember { mutableStateOf(false) }
@@ -461,13 +462,15 @@ internal fun PageViewScreen(
 
     if (showTrashConfirm) {
         val target = visiblePage
+        val loss = trashLossWarning(unsyncedWork)
         androidx.compose.material3.AlertDialog(
             onDismissRequest = { showTrashConfirm = false },
             title = { Text("Move to trash?") },
             text = {
                 Text(
                     text = "\"${target?.title.orEmpty()}\" will be moved to the collective's trash. " +
-                        "You can restore it from Trash.",
+                        "You can restore it from Trash." +
+                        (loss?.let { "\n\n$it" } ?: ""),
                 )
             },
             confirmButton = {
