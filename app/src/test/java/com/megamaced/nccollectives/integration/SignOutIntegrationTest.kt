@@ -1,13 +1,18 @@
 package com.megamaced.nccollectives.integration
 
 import androidx.test.ext.junit.runners.AndroidJUnit4
+import com.megamaced.nccollectives.data.auth.AppPasswordRevoker
 import com.megamaced.nccollectives.data.auth.LocalDataWiper
 import com.megamaced.nccollectives.data.auth.LogoutHandler
 import com.megamaced.nccollectives.data.auth.SessionManager
+import com.megamaced.nccollectives.data.auth.StoredCredentials
+import com.megamaced.nccollectives.data.auth.TokenStore
 import com.megamaced.nccollectives.share.SharePayload
 import com.megamaced.nccollectives.share.SharePayloadHolder
 import io.mockk.coEvery
 import io.mockk.coVerify
+import io.mockk.coVerifyOrder
+import io.mockk.every
 import io.mockk.mockk
 import io.mockk.verify
 import io.mockk.verifyOrder
@@ -41,13 +46,19 @@ class SignOutIntegrationTest {
     private lateinit var wiper: LocalDataWiper
     private lateinit var holder: SharePayloadHolder
     private lateinit var logoutHandler: LogoutHandler
+    private lateinit var tokenStore: TokenStore
+    private lateinit var revoker: AppPasswordRevoker
 
     @Before
     fun setUp() {
         sessionManager = mockk(relaxed = true)
         wiper = mockk()
         holder = SharePayloadHolder()
-        logoutHandler = LogoutHandler(sessionManager, wiper, holder)
+        tokenStore = mockk(relaxed = true)
+        revoker = mockk()
+        every { tokenStore.allCredentials() } returns listOf(ALICE, BOB)
+        coEvery { revoker.revoke(any()) } returns true
+        logoutHandler = LogoutHandler(sessionManager, wiper, holder, tokenStore, revoker)
     }
 
     @After
@@ -81,6 +92,22 @@ class SignOutIntegrationTest {
                 sessionManager.beginSignOut()
                 sessionManager.endSignOut()
             }
+        }
+
+    @Test
+    fun signOut_revokesEveryStoredAppPasswordBeforeForgettingIt() =
+        runTest {
+            // S-28: deleting the credential here left it valid on the server.
+            coEvery { wiper.wipe(any()) } returns Unit
+
+            logoutHandler.signOut()
+
+            verify(timeout = TIMEOUT_MS) { sessionManager.endSignOut() }
+            coVerifyOrder {
+                revoker.revoke(ALICE)
+                sessionManager.endSignOut()
+            }
+            coVerify { revoker.revoke(BOB) }
         }
 
     @Test
@@ -140,6 +167,8 @@ class SignOutIntegrationTest {
         }
 
     private companion object {
+        val ALICE = StoredCredentials(host = "https://a.example", loginName = "alice", appPassword = "a-pass")
+        val BOB = StoredCredentials(host = "https://b.example", loginName = "bob", appPassword = "b-pass")
         const val TIMEOUT_MS = 2_000L
     }
 }

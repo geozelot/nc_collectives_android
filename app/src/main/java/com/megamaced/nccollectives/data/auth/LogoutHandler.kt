@@ -4,6 +4,8 @@ import com.megamaced.nccollectives.share.SharePayloadHolder
 import kotlinx.coroutines.CoroutineScope
 import kotlinx.coroutines.Dispatchers
 import kotlinx.coroutines.SupervisorJob
+import kotlinx.coroutines.async
+import kotlinx.coroutines.awaitAll
 import kotlinx.coroutines.launch
 import timber.log.Timber
 import javax.inject.Inject
@@ -56,10 +58,16 @@ class LogoutHandler
         private val sessionManager: SessionManager,
         private val localDataWiper: LocalDataWiper,
         private val sharePayloadHolder: SharePayloadHolder,
+        private val tokenStore: TokenStore,
+        private val appPasswordRevoker: AppPasswordRevoker,
     ) {
         private val scope = CoroutineScope(SupervisorJob() + Dispatchers.IO)
 
         fun signOut() {
+            // S-28: read before anything is cleared. Sign-out forgets every
+            // account on the device, so every app password is retired on its
+            // server, alongside the wipe and before endSignOut drops them.
+            val credentials = tokenStore.allCredentials()
             sessionManager.beginSignOut()
             // S-16: drop any pending share payload before the next session
             // starts. A share intent captured under user A would otherwise
@@ -68,6 +76,7 @@ class LogoutHandler
             // with user A's payload targeting user B's Nextcloud.
             sharePayloadHolder.discard()
             scope.launch {
+                val revocations = credentials.map { credential -> async { appPasswordRevoker.revoke(credential) } }
                 try {
                     localDataWiper.wipe(keepDevicePreferences = false)
                 } catch (e: Exception) {
@@ -78,6 +87,9 @@ class LogoutHandler
                     // believes they have signed out.
                     Timber.e(e, "Local wipe failed during sign-out; clearing credentials anyway")
                 } finally {
+                    // Bounded by the revoker's own call timeout; never by
+                    // whether the server could be reached.
+                    revocations.awaitAll()
                     sessionManager.endSignOut()
                 }
             }

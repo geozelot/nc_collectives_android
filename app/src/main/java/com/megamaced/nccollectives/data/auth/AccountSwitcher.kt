@@ -46,6 +46,7 @@ class AccountSwitcher
         private val syncScheduler: SyncScheduler,
         private val sharePayloadHolder: SharePayloadHolder,
         private val database: NcCollectivesDatabase,
+        private val appPasswordRevoker: AppPasswordRevoker,
     ) : ExpiredSessionHandler {
         private val scope = CoroutineScope(SupervisorJob() + Dispatchers.IO)
 
@@ -158,6 +159,11 @@ class AccountSwitcher
             what: String,
         ) {
             if (tokenStore.accounts().none { it.id == accountId }) return
+            // S-28: retire the app password on the server too, best effort,
+            // with the credential read before it is forgotten here.
+            tokenStore.credentialsFor(accountId)?.let { credential ->
+                scope.launch { appPasswordRevoker.revoke(credential) }
+            }
             if (accountId != tokenStore.activeAccountId()) {
                 // None of this account's data is on the device, so there is
                 // nothing to wipe and no reason to disturb the live session.
