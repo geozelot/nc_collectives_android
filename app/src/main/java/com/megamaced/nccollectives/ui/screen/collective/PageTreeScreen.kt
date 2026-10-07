@@ -56,7 +56,10 @@ import androidx.compose.ui.Alignment
 import androidx.compose.ui.Modifier
 import androidx.compose.ui.graphics.Color
 import androidx.compose.ui.platform.LocalConfiguration
+import androidx.compose.ui.semantics.CustomAccessibilityAction
 import androidx.compose.ui.semantics.Role
+import androidx.compose.ui.semantics.customActions
+import androidx.compose.ui.semantics.semantics
 import androidx.compose.ui.text.input.ImeAction
 import androidx.compose.ui.unit.dp
 import androidx.hilt.navigation.compose.hiltViewModel
@@ -181,6 +184,7 @@ internal fun PageTreeScreen(
                     onToggleFavorite = viewModel::toggleFavorite,
                     onAddSubpage = { parentId -> newPageMode = NewPageMode.FixedParent(parentId) },
                     onReorder = viewModel::onReorderDrop,
+                    onMove = viewModel::moveAmongSiblings,
                     onOpenMembers = onOpenMembers,
                     onRetryMembers = viewModel::retryMembers,
                 )
@@ -227,6 +231,7 @@ private fun PageTreeList(
     onToggleFavorite: (Long, Boolean) -> Unit,
     onAddSubpage: (Long) -> Unit,
     onReorder: (movedPageId: Long, newVisibleOrder: List<Long>) -> Unit,
+    onMove: (pageId: Long, delta: Int) -> Unit,
     onOpenMembers: () -> Unit,
     onRetryMembers: () -> Unit,
 ) {
@@ -319,6 +324,28 @@ private fun PageTreeList(
                     onOpen = { onPageClick(node.page.id) },
                     onToggleFavorite = { onToggleFavorite(node.page.id, node.isFavorite) },
                     onAddSubpage = { onAddSubpage(node.page.id) },
+                    // Long-press-and-drag has no accessibility path, so a
+                    // screen reader or switch user could not reorder at
+                    // all. The same moves, one place at a time, as actions.
+                    moveActions = localNodes
+                        .filter { it.page.parentId == node.page.parentId }
+                        .map { it.page.id }
+                        .let { siblings ->
+                            listOfNotNull(
+                                siblingOrderAfterMove(siblings, node.page.id, -1)?.let {
+                                    CustomAccessibilityAction("Move ${node.page.title} up") {
+                                        onMove(node.page.id, -1)
+                                        true
+                                    }
+                                },
+                                siblingOrderAfterMove(siblings, node.page.id, 1)?.let {
+                                    CustomAccessibilityAction("Move ${node.page.title} down") {
+                                        onMove(node.page.id, 1)
+                                        true
+                                    }
+                                },
+                            )
+                        },
                     dragHandleModifier = Modifier.longPressDraggableHandle(
                         onDragStopped = {
                             // B-35: pass the moved id + the full post-drag
@@ -349,6 +376,7 @@ private fun PageTreeItem(
     onToggleFavorite: () -> Unit,
     onAddSubpage: () -> Unit,
     dragHandleModifier: Modifier = Modifier,
+    moveActions: List<CustomAccessibilityAction> = emptyList(),
 ) {
     // No indentation regardless of depth — the tree relationship is shown by
     // the chevron on folder rows, not by horizontal offset.
@@ -362,6 +390,7 @@ private fun PageTreeItem(
     Row(
         modifier = Modifier
             .fillMaxWidth()
+            .semantics { if (moveActions.isNotEmpty()) customActions = moveActions }
             .then(dragHandleModifier)
             .clickable(onClick = onOpen)
             .padding(start = 8.dp, end = 4.dp, top = 8.dp, bottom = 8.dp),
