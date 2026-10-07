@@ -55,7 +55,6 @@ import androidx.compose.runtime.setValue
 import androidx.compose.ui.Alignment
 import androidx.compose.ui.Modifier
 import androidx.compose.ui.graphics.Color
-import androidx.compose.ui.platform.LocalConfiguration
 import androidx.compose.ui.semantics.Role
 import androidx.compose.ui.text.input.ImeAction
 import androidx.compose.ui.unit.dp
@@ -106,8 +105,6 @@ internal fun PageTreeScreen(
         viewModel.refreshIfStale()
         onPauseOrDispose { }
     }
-
-    val isCompactWidth = LocalConfiguration.current.screenWidthDp < 600
 
     Scaffold(
         modifier = Modifier.padding(innerPadding),
@@ -175,7 +172,6 @@ internal fun PageTreeScreen(
                     collectiveEmoji = ui.collectiveEmoji,
                     recentPages = ui.recentPages,
                     membersStrip = ui.membersStrip,
-                    showLandingCard = isCompactWidth,
                     onToggle = viewModel::toggleExpanded,
                     onPageClick = onPageClick,
                     onToggleFavorite = viewModel::toggleFavorite,
@@ -213,7 +209,7 @@ private sealed interface NewPageMode {
 }
 
 @Composable
-private fun PageTreeList(
+internal fun PageTreeList(
     nodes: List<PageNode>,
     expanded: Set<Long>,
     landingPage: com.megamaced.nccollectives.domain.model.Page?,
@@ -221,7 +217,6 @@ private fun PageTreeList(
     collectiveEmoji: String?,
     recentPages: List<PageListItem>,
     membersStrip: MembersStripState,
-    showLandingCard: Boolean,
     onToggle: (Long) -> Unit,
     onPageClick: (Long) -> Unit,
     onToggleFavorite: (Long, Boolean) -> Unit,
@@ -268,9 +263,8 @@ private fun PageTreeList(
         // the name in the top bar) above the two widgets that are both
         // content entry points.
         //
-        // Not gated on `showLandingCard`: the strip measures its own
-        // container and truncates to fit, so unlike the landing card it has
-        // nothing to say about screen width. `MembersStrip` self-hides when
+        // Not width-gated: the strip measures its own container and
+        // truncates to fit. `MembersStrip` self-hides when
         // membership isn't addressable, but the `item` is skipped as well so
         // an unaddressable collective doesn't pay for an empty lazy item —
         // and so the divider below knows whether anything was drawn.
@@ -288,7 +282,12 @@ private fun PageTreeList(
                 RecentPagesStrip(pages = recentPages, onPageClick = onPageClick)
             }
         }
-        if (showLandingCard && landingPage != null) {
+        // U7: at every width. The card was compact-only (< 600 dp) to leave
+        // room for a tablet two-pane layout that was deferred and never
+        // built. The tree skips the landing page because the card stands for
+        // it, so in landscape, on a tablet or on an unfolded foldable the
+        // landing page wasn't reachable at all.
+        if (landingPage != null) {
             item(key = "header-landing") {
                 LandingPageCard(
                     landing = landingPage,
@@ -300,7 +299,7 @@ private fun PageTreeList(
         }
         if (membersStrip.addressable ||
             recentPages.isNotEmpty() ||
-            (showLandingCard && landingPage != null)
+            landingPage != null
         ) {
             item(key = "header-divider") { HorizontalDivider() }
         }
