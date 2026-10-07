@@ -440,4 +440,26 @@ class RetargetAttachmentRefsTest {
     private companion object {
         const val PAGE_ID = 12L
     }
+
+    @Test
+    fun attachmentNamesWithSpacesAndParens_makeLinksThatParseBack() {
+        // U10: `![a b.jpg](a b.jpg)` is not a link in CommonMark.
+        listOf("a b.jpg", "scan (1).pdf", "100% done.png", "plain.png").forEach { name ->
+            val target = attachmentLinkTarget(name)
+            assertTrue("$target has no space or paren", target.none { it == ' ' || it == '(' || it == ')' })
+            assertEquals(name, parseAttachmentRef(target, pageId = 12)?.fileName)
+        }
+        assertEquals("![a b.jpg](a%20b.jpg)", attachmentMarkdown("a b.jpg", image = true))
+        assertEquals("[odd\\]name.pdf](odd]name.pdf)", attachmentMarkdown("odd]name.pdf", image = false))
+    }
+
+    @Test
+    fun aRetargetedRef_isEncodedToo() {
+        val body = "![photo.jpg](photo.jpg)"
+
+        assertEquals(
+            "![photo.jpg](photo%20%282%29.jpg)",
+            retargetAttachmentRefs(body, pageId = 12, oldName = "photo.jpg", newName = "photo (2).jpg"),
+        )
+    }
 }
