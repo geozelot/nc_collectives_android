@@ -25,6 +25,17 @@ jobs:
       - uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7.0.1
         with:
           persist-credentials: false
+          # Full history, so the next step can see dev.
+          fetch-depth: 0
+
+      # Release only what dev already has: a fork-v* tag on any other commit
+      # would ship code that never went through dev.
+      - name: Check the tagged commit is on dev
+        run: |
+          if ! git merge-base --is-ancestor "$GITHUB_SHA" refs/remotes/origin/dev; then
+            echo "::error::$GITHUB_REF_NAME points at $GITHUB_SHA, which is not on dev. Tag a commit on dev."
+            exit 1
+          fi
 
       - uses: actions/setup-java@de7274f081f381c8f8158605e0321c36c376e2e6 # v6.0.1
         with:
