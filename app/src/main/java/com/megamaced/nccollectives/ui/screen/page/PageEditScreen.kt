@@ -57,6 +57,7 @@ import androidx.compose.runtime.saveable.rememberSaveable
 import androidx.compose.runtime.setValue
 import androidx.compose.ui.Modifier
 import androidx.compose.ui.graphics.Color
+import androidx.compose.ui.graphics.SolidColor
 import androidx.compose.ui.platform.LocalContext
 import androidx.compose.ui.text.TextRange
 import androidx.compose.ui.text.input.TextFieldValue
@@ -319,6 +320,10 @@ internal fun PageEditScreen(
                                 .fillMaxSize()
                                 .padding(16.dp),
                             textStyle = bodyStyle,
+                            // U5: BasicTextField's default cursor is solid
+                            // black, which on the dark surface is no cursor
+                            // at all. The text already takes onSurface.
+                            cursorBrush = SolidColor(MaterialTheme.colorScheme.primary),
                             keyboardOptions = KeyboardOptions.Default,
                             keyboardActions = KeyboardActions.Default,
                         )
